@@ -5,7 +5,6 @@
     "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"
   },
   "permissions": {
-    "allow": [],
     "defaultMode": "plan"
   },
   "hooks": {
@@ -22,6 +21,7 @@
     ],
     "UserPromptSubmit": [
       {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",

@@ -2,15 +2,16 @@
 
 Automate the full commit-push-PR pipeline. This is a **git-only workflow** — never build or test.
 
-Arguments: $ARGUMENTS (optional — GitHub usernames to add as reviewers, e.g. `@user1 @user2`)
+Arguments: $ARGUMENTS (optional — additional instructions for this PR, e.g. `target develop` or `skip commit`)
 
 ## Steps
 
 1. **Check KB/memory** for any relevant PR conventions or context related to the current branch/feature.
 
 2. **Analyze changes**:
+   - Detect the repo's default branch: try `git symbolic-ref refs/remotes/origin/HEAD` first (local, no network), fall back to `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` if unset.
    - Run `git status` (never use `-uall`) and `git diff` (staged + unstaged) in parallel.
-   - Run `git log main..HEAD --oneline` to see existing commits on this branch.
+   - Run `git log <default-branch>..HEAD --oneline` to see existing commits on this branch.
    - Extract the **ticket number** from the branch name (pattern: `__USER_NAME__/{ticket}-*` or `{ticket}-*`) or from commit messages. If not found, ask the user.
 
 3. **Stage and commit**:
@@ -26,6 +27,7 @@ Arguments: $ARGUMENTS (optional — GitHub usernames to add as reviewers, e.g. `
    - **Title**: `[TICKET_NUMBER] Brief description` — must be under 72 characters.
    - **Body**: Fill in Context/Acceptance Criteria from the commit history and branch purpose. Fill in Testing Steps. Do NOT include unrelated PR references or auto-linked issue numbers.
    - Use `gh pr create` with HEREDOC for the body.
-   - If reviewers were provided in `$ARGUMENTS`, add them with `--reviewer`.
 
 6. **Report** the PR URL.
+
+7. **Use** the skill continuous-learning.

@@ -284,12 +284,37 @@ configure_project() {
         sed -i '' '/<!-- > \*\*Note:\*\* .CLAUDE\.md. is a symlink/d' "$dest"
     fi
 
+    # --- Generate XcodeBuildMCP config ---
+    local xbm_dir="$project_path/.xcodebuildmcp"
+    local xbm_config="$xbm_dir/config.yaml"
+    if [[ -f "$xbm_config" ]]; then
+        info "XcodeBuildMCP config already exists — skipping"
+    else
+        mkdir -p "$xbm_dir"
+        cat > "$xbm_config" <<XBMEOF
+schemaVersion: 1
+enabledWorkflows:
+  - xcode-ide
+  - simulator
+  - ui-testing
+  - project-discovery
+  - utilities
+  - session-management
+sessionDefaults:
+  projectPath: ./${xcode_project}
+  suppressWarnings: false
+  platform: iOS
+XBMEOF
+        success "Created ${xbm_config}"
+    fi
+
     echo ""
-    success "Created ${dest}"
-    echo -e "    Xcode project: ${BOLD}${xcode_project}${NC}"
-    echo -e "    Branch prefix:  ${BOLD}${user_name}/{ticket-and-small-title}${NC}"
+    success "Project configured: ${project_path}"
+    echo -e "    Xcode project:      ${BOLD}${xcode_project}${NC}"
+    echo -e "    Branch prefix:      ${BOLD}${user_name}/{ticket-and-small-title}${NC}"
+    echo -e "    XcodeBuildMCP:      ${BOLD}.xcodebuildmcp/config.yaml${NC}"
     if [[ "$has_symlink" == true ]]; then
-        echo -e "    Symlink note:   ${GREEN}enabled${NC} (CLAUDE.md → AGENTS.md)"
+        echo -e "    Symlink note:       ${GREEN}enabled${NC} (CLAUDE.md → AGENTS.md)"
     fi
 }
 
@@ -477,7 +502,7 @@ phase_selection() {
     echo ""
 
     echo -e "  ${BOLD}2. Settings${NC}"
-    echo -e "     Plan mode by default, always-thinking enabled, MCP timeouts, Haiku→Sonnet override."
+    echo -e "     Plan mode by default, always-thinking enabled, env vars, hooks config, plugins."
     if ask_yn "Apply recommended settings?"; then
         INSTALL_SETTINGS=1
     fi
@@ -1008,6 +1033,33 @@ phase_install() {
         success "Settings applied"
     fi
 
+    # --- Global gitignore ---
+    local git_ignore_dir="$HOME/.config/git"
+    local git_ignore="$git_ignore_dir/ignore"
+    local gitignore_entries=(".claude" "*.local.*" ".serena" ".xcodebuildmcp")
+    local added_entries=()
+
+    mkdir -p "$git_ignore_dir"
+    touch "$git_ignore"
+
+    for entry in "${gitignore_entries[@]}"; do
+        if ! grep -qxF "$entry" "$git_ignore" 2>/dev/null; then
+            added_entries+=("$entry")
+        fi
+    done
+
+    if [[ ${#added_entries[@]} -gt 0 ]]; then
+        {
+            echo ""
+            echo "# Added by Claude Code iOS Setup"
+            for entry in "${added_entries[@]}"; do
+                echo "$entry"
+            done
+        } >> "$git_ignore"
+        INSTALLED_ITEMS+=("Global gitignore: ${added_entries[*]}")
+        success "Global gitignore updated (${#added_entries[@]} entries added)"
+    fi
+
 }
 
 # ---------------------------------------------------------------------------
@@ -1270,6 +1322,70 @@ phase_doctor() {
         fi
     fi
     echo ""
+
+    # ===== Global Gitignore =====
+    echo -e "${BOLD}  Global Gitignore${NC} ${DIM}(~/.config/git/ignore)${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────────${NC}"
+
+    local git_ignore="$HOME/.config/git/ignore"
+    if [[ -f "$git_ignore" ]]; then
+        local required_entries=(".claude" "*.local.*" ".serena" ".xcodebuildmcp")
+        for entry in "${required_entries[@]}"; do
+            if grep -qxF "$entry" "$git_ignore" 2>/dev/null; then
+                doc_pass "$entry"
+            else
+                doc_fail "$entry — missing from global gitignore"
+            fi
+        done
+    else
+        doc_fail "~/.config/git/ignore not found"
+    fi
+    echo ""
+
+    # ===== Project (current directory) =====
+    local has_project=false
+    local project_dir="$PWD"
+
+    # Detect if cwd is an iOS project
+    if ls "$project_dir"/*.xcodeproj >/dev/null 2>&1 || ls "$project_dir"/*.xcworkspace >/dev/null 2>&1; then
+        has_project=true
+    fi
+
+    if $has_project; then
+        echo -e "${BOLD}  Project${NC} ${DIM}($(basename "$project_dir"))${NC}"
+        echo -e "  ${DIM}──────────────────────────────────────────${NC}"
+
+        # CLAUDE.local.md
+        if [[ -f "$project_dir/CLAUDE.local.md" ]]; then
+            doc_pass "CLAUDE.local.md"
+        else
+            doc_fail "CLAUDE.local.md — not found. Run: ${SCRIPT_DIR}/setup.sh --configure-project"
+        fi
+
+        # .xcodebuildmcp/config.yaml
+        if [[ -f "$project_dir/.xcodebuildmcp/config.yaml" ]]; then
+            doc_pass ".xcodebuildmcp/config.yaml"
+            # Check if xcode-ide workflow is enabled
+            if grep -q "xcode-ide" "$project_dir/.xcodebuildmcp/config.yaml" 2>/dev/null; then
+                doc_pass "xcode-ide workflow enabled"
+            else
+                doc_warn "xcode-ide workflow not enabled — xcode_tools_* unavailable"
+            fi
+        else
+            doc_fail ".xcodebuildmcp/config.yaml — not found. Run: ${SCRIPT_DIR}/setup.sh --configure-project"
+        fi
+
+        # Serena config (auto-generated on first run)
+        if [[ -d "$project_dir/.serena" ]]; then
+            doc_pass ".serena/ config (auto-generated)"
+        else
+            doc_skip ".serena/ — will be auto-generated on first Serena run"
+        fi
+        echo ""
+    else
+        echo -e "  ${DIM}  Tip: run from a project root to also check per-project config${NC}"
+        echo ""
+    fi
 
     # ===== Summary =====
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

@@ -63,7 +63,7 @@ The script lets you pick from the following components:
 | Config | Description |
 |--------|-------------|
 | **Session hooks** | Git status, simulator info, Ollama status on startup; learning reminder on each prompt |
-| **Settings** | Plan mode by default, always-thinking, MCP timeouts, Haiku→Sonnet override |
+| **Settings** | Plan mode by default, always-thinking, env vars, hooks config, plugins |
 
 ### Dependencies (auto-resolved)
 
