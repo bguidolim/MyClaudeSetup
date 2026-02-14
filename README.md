@@ -12,13 +12,37 @@ Run one command to set up a complete AI-assisted iOS development environment on 
 
 ## Quick Start
 
+One-line install:
+
 ```bash
-git clone <this-repo-url> ~/Developer/my-claude-ios-setup
+curl -fsSL https://raw.githubusercontent.com/bguidolim/my-claude-ios-setup/main/install.sh | bash
+```
+
+Or install everything without prompts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bguidolim/my-claude-ios-setup/main/install.sh | bash -s -- --all
+```
+
+Or clone manually:
+
+```bash
+git clone https://github.com/bguidolim/my-claude-ios-setup.git ~/Developer/my-claude-ios-setup
 cd ~/Developer/my-claude-ios-setup
 ./setup.sh
 ```
 
 The script is interactive — it will ask what you want to install before making any changes.
+
+## Usage
+
+```bash
+./setup.sh                      # Interactive setup (pick components)
+./setup.sh --all                # Install everything (minimal prompts)
+./setup.sh --doctor             # Diagnose installation health
+./setup.sh --configure-project  # Configure CLAUDE.local.md for a project
+./setup.sh --help               # Show usage
+```
 
 ## What Gets Installed
 
@@ -62,7 +86,7 @@ The script lets you pick from the following components:
 
 | Config | Description |
 |--------|-------------|
-| **Session hooks** | Git status, simulator info, Ollama status on startup; learning reminder on each prompt |
+| **Session hooks** | On startup: git context (branch, uncommitted changes, stash, conflicts, remote tracking, open PRs), simulator UUID, Ollama status, docs-mcp library sync. On each prompt: learning reminder |
 | **Settings** | Plan mode by default, always-thinking, env vars, hooks config, plugins |
 
 ### Dependencies (auto-resolved)
@@ -72,7 +96,7 @@ The script automatically installs required dependencies based on your selections
 - **Homebrew** — if any packages need installing
 - **Node.js** — for npx-based MCP servers and skills
 - **jq** — for JSON config merging
-- **gh** — GitHub CLI
+- **gh** — GitHub CLI (when /pr command is selected)
 - **uv** — for Serena (Python-based)
 - **Ollama** + `mxbai-embed-large` — for docs-mcp-server embeddings
 
@@ -81,6 +105,17 @@ The script automatically installs required dependencies based on your selections
 After running the setup script, configure each iOS project:
 
 ### 1. Add CLAUDE.local.md
+
+The automated way (recommended):
+
+```bash
+cd /path/to/your/project
+~/Developer/my-claude-ios-setup/setup.sh --configure-project
+```
+
+This auto-detects your Xcode project, asks for your name, generates `CLAUDE.local.md` with placeholders filled in, and creates `.xcodebuildmcp/config.yaml`.
+
+Or manually:
 
 ```bash
 cp ~/Developer/my-claude-ios-setup/templates/CLAUDE.local.md /path/to/your/project/CLAUDE.local.md
@@ -100,6 +135,7 @@ If this is a fresh install, run `claude` and follow the authentication prompts.
 | `hooks/session_start.sh` | Session startup hook |
 | `hooks/continuous-learning-activator.sh` | Learning reminder hook |
 | `skills/continuous-learning/` | Custom continuous-learning skill |
+| `commands/pr.md` | /pr custom command template |
 | `templates/CLAUDE.local.md` | Per-project Claude instructions template |
 
 ## Customization
@@ -142,10 +178,11 @@ npx skills add github-user/skill-repo
 # Check if Ollama is running
 curl http://localhost:11434/api/tags
 
-# Start manually
-open -a Ollama
-# or
-ollama serve
+# Start as brew service
+brew services start ollama
+
+# Check service status
+brew services info ollama
 ```
 
 ### MCP servers not appearing
@@ -174,7 +211,7 @@ node --version
 npx --version
 
 # Clear npx cache if needed
-npx clear-npx-cache
+rm -rf ~/.npm/_npx
 ```
 
 ### Serena language server issues
@@ -191,6 +228,7 @@ xcrun sourcekit-lsp --help
 The script creates timestamped backups before modifying existing files:
 - `~/.claude/settings.json.backup.YYYYMMDD_HHMMSS`
 - `~/.claude.json.backup.YYYYMMDD_HHMMSS`
+- `<project>/CLAUDE.local.md.backup.YYYYMMDD_HHMMSS` (when `--configure-project` overwrites)
 
 ## License
 

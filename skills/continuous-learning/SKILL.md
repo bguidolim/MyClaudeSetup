@@ -14,7 +14,7 @@ allowed-tools:
   - mcp__serena__delete_memory
   - mcp__serena__edit_memory
   - mcp__serena__find_symbol
-  - mcp__serena__read_file
+  - mcp__serena__find_file
   - mcp__serena__search_for_pattern
   - mcp__serena__get_symbols_overview
   - mcp__docs-mcp-server__search_docs

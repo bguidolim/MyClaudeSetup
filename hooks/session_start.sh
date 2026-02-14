@@ -83,20 +83,46 @@ main() {
         fi
     fi
 
-    # === OLLAMA STATUS & DOCS-MCP REFRESH ===
-    # Env vars (OPENAI_API_KEY, OPENAI_API_BASE, DOCS_MCP_EMBEDDING_MODEL) set in .zshrc
-    if [ -d ".serena/memories" ]; then
-        if curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
-            context+="\n🦙 Ollama: running"
-        else
-            context+="\n⚠️ Ollama not running — docs-mcp semantic search/refresh will fail"
-        fi
+    # === OLLAMA STATUS & DOCS-MCP LIBRARY ===
+    local ollama_running=false
+    if curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
+        ollama_running=true
+        context+="\n🦙 Ollama: running"
+    fi
 
-        # Refresh index (background, non-blocking)
-        local repo_name
-        repo_name=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "")
-        if [ -n "$repo_name" ]; then
-            (npx -y @arabold/docs-mcp-server@latest refresh "$repo_name" --silent >/dev/null 2>&1) &
+    # If Serena is configured for this project, ensure docs-mcp-server library exists
+    if [ -d ".serena" ]; then
+        if [ "$ollama_running" = true ]; then
+            # Ensure memories dir exists so Serena can write to it
+            mkdir -p .serena/memories
+
+            local repo_name
+            repo_name=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "")
+            if [ -n "$repo_name" ]; then
+                local memories_path
+                memories_path="$(git rev-parse --show-toplevel 2>/dev/null)/.serena/memories"
+
+                # Background: ensure library exists and is up to date
+                (
+                    export OPENAI_API_KEY=ollama
+                    export OPENAI_API_BASE=http://localhost:11434/v1
+
+                    local embedding_model="openai:mxbai-embed-large"
+
+                    if npx -y @arabold/docs-mcp-server@latest list --silent 2>/dev/null | grep -q "$repo_name"; then
+                        npx -y @arabold/docs-mcp-server@latest refresh "$repo_name" \
+                            --embedding-model "$embedding_model" \
+                            --silent >/dev/null 2>&1
+                    else
+                        npx -y @arabold/docs-mcp-server@latest scrape "$repo_name" \
+                            "file://$memories_path" \
+                            --embedding-model "$embedding_model" \
+                            --silent >/dev/null 2>&1
+                    fi
+                ) &
+            fi
+        else
+            context+="\n⚠️ Ollama not running — docs-mcp semantic search will fail"
         fi
     fi
 

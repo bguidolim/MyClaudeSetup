@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ~/.claude/hooks/session_start.sh"
+            "command": "bash ~/.claude/hooks/session_start.sh"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ~/.claude/hooks/continuous-learning-activator.sh"
+            "command": "bash ~/.claude/hooks/continuous-learning-activator.sh"
           }
         ]
       }

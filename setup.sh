@@ -23,6 +23,7 @@ CLAUDE_DIR="$HOME/.claude"
 CLAUDE_SETTINGS="$CLAUDE_DIR/settings.json"
 CLAUDE_HOOKS_DIR="$CLAUDE_DIR/hooks"
 CLAUDE_SKILLS_DIR="$CLAUDE_DIR/skills"
+SETUP_MANIFEST="$CLAUDE_DIR/.setup-manifest"
 
 # Colors
 RED='\033[0;31m'
@@ -131,6 +132,28 @@ check_command() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Run a command, capturing stderr. On failure, warn instead of crashing.
+# Usage: try_install "Label" command args...
+try_install() {
+    local label=$1
+    shift
+    local err_output
+    if err_output=$("$@" 2>&1); then
+        INSTALLED_ITEMS+=("$label")
+        return 0
+    else
+        warn "Failed to install $label"
+        [[ -n "$err_output" ]] && echo -e "  ${DIM}${err_output}${NC}" | head -3
+        SKIPPED_ITEMS+=("$label (failed)")
+        return 1
+    fi
+}
+
+# Escape a string for use in sed replacement (handles /, &, \)
+sed_escape() {
+    printf '%s' "$1" | sed 's/[&/\]/\\&/g'
+}
+
 backup_file() {
     local file=$1
     if [[ -f "$file" ]]; then
@@ -138,6 +161,31 @@ backup_file() {
         cp "$file" "$backup"
         info "Backed up $(basename "$file") → $(basename "$backup")"
     fi
+}
+
+# Hash a file for manifest tracking (sha256, macOS compatible)
+file_hash() {
+    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1
+}
+
+# Record a source→installed mapping in the manifest
+# Usage: manifest_record "relative/source/path"
+manifest_record() {
+    local rel_path=$1
+    local hash
+    hash=$(file_hash "$SCRIPT_DIR/$rel_path")
+    # Remove old entry if present, then append
+    if [[ -f "$SETUP_MANIFEST" ]]; then
+        grep -v "^${rel_path}=" "$SETUP_MANIFEST" > "${SETUP_MANIFEST}.tmp" 2>/dev/null || true
+        mv "${SETUP_MANIFEST}.tmp" "$SETUP_MANIFEST"
+    fi
+    echo "${rel_path}=${hash}" >> "$SETUP_MANIFEST"
+}
+
+# Initialize manifest with SCRIPT_DIR header
+manifest_init() {
+    mkdir -p "$(dirname "$SETUP_MANIFEST")"
+    echo "SCRIPT_DIR=${SCRIPT_DIR}" > "$SETUP_MANIFEST"
 }
 
 detect_brew_path() {
@@ -269,13 +317,15 @@ configure_project() {
 
     # 1. Xcode project: remove EDIT comment, replace placeholder
     sed -i '' '/<!-- EDIT: Set your .xcodeproj and default scheme below -->/d' "$dest"
-    # Escape dots in xcode_project for sed replacement (e.g. MyApp.xcodeproj)
-    local xcode_escaped="${xcode_project//./\\.}"
+    local xcode_escaped
+    xcode_escaped=$(sed_escape "${xcode_project//./\\.}")
     sed -i '' "s/__PROJECT__\.xcodeproj/${xcode_escaped}/g" "$dest"
 
     # 2. Branch naming: remove EDIT comment, replace placeholder
     sed -i '' '/<!-- EDIT: Set your branch naming convention below -->/d' "$dest"
-    sed -i '' "s/<your-name>/${user_name}/g" "$dest"
+    local safe_name
+    safe_name=$(sed_escape "$user_name")
+    sed -i '' "s/<your-name>/${safe_name}/g" "$dest"
 
     # 3. CLAUDE.md symlink
     if [[ "$has_symlink" == true ]]; then
@@ -641,8 +691,8 @@ resolve_dependencies() {
         fi
     fi
 
-    # Also install gh if not present (optional but useful)
-    if ! check_command gh; then
+    # Install gh if /pr command is selected and not present
+    if [[ $INSTALL_CMD_PR -eq 1 ]] && ! check_command gh; then
         INSTALL_GH=1
     fi
 }
@@ -751,26 +801,29 @@ phase_install() {
     local total_steps=0
     local current_step=0
 
-    # Count total steps
-    [[ $INSTALL_HOMEBREW -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_NODE -eq 1 || $INSTALL_JQ -eq 1 || $INSTALL_GH -eq 1 || $INSTALL_UV -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_OLLAMA -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_CLAUDE_CODE -eq 1 ]] && ((total_steps++))
+    # Initialize manifest for tracking installed file versions
+    manifest_init
+
+    # Count total steps (using $((x + 1)) instead of ((x++)) for bash 3.2 / set -e safety)
+    [[ $INSTALL_HOMEBREW -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_NODE -eq 1 || $INSTALL_JQ -eq 1 || $INSTALL_GH -eq 1 || $INSTALL_UV -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_OLLAMA -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_CLAUDE_CODE -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_SOSUMI -eq 1 || $INSTALL_MCP_SERENA -eq 1 || \
-       $INSTALL_MCP_DOCS -eq 1 || $INSTALL_MCP_OMNISEARCH -eq 1 ]] && ((total_steps++))
+       $INSTALL_MCP_DOCS -eq 1 || $INSTALL_MCP_OMNISEARCH -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 || $INSTALL_PLUGIN_PR_REVIEW -eq 1 || \
        $INSTALL_PLUGIN_SIMPLIFIER -eq 1 || $INSTALL_PLUGIN_RALPH -eq 1 || \
-       $INSTALL_PLUGIN_HUD -eq 1 || $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_SKILL_LEARNING -eq 1 || $INSTALL_SKILL_XCODEBUILD -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_CMD_PR -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_HOOKS -eq 1 ]] && ((total_steps++))
-    [[ $INSTALL_SETTINGS -eq 1 ]] && ((total_steps++))
+       $INSTALL_PLUGIN_HUD -eq 1 || $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_SKILL_LEARNING -eq 1 || $INSTALL_SKILL_XCODEBUILD -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_CMD_PR -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_HOOKS -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ $INSTALL_SETTINGS -eq 1 ]] && total_steps=$((total_steps + 1))
 
     header "🚀 Installing..."
 
     # --- Homebrew ---
     if [[ $INSTALL_HOMEBREW -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Homebrew"
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         ensure_brew_in_path
@@ -782,7 +835,7 @@ phase_install() {
 
     # --- Brew packages ---
     if [[ $INSTALL_NODE -eq 1 || $INSTALL_JQ -eq 1 || $INSTALL_GH -eq 1 || $INSTALL_UV -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Homebrew packages"
 
         if [[ $INSTALL_NODE -eq 1 ]]; then
@@ -816,7 +869,7 @@ phase_install() {
 
     # --- Ollama ---
     if [[ $INSTALL_OLLAMA -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Setting up Ollama"
 
         if ! check_command ollama; then
@@ -833,28 +886,37 @@ phase_install() {
         fi
 
         # Wait for Ollama to be ready
+        local ollama_ready=true
         if ! curl -s --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
             local attempts=0
             while ! curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; do
-                ((attempts++))
+                attempts=$((attempts + 1))
                 if [[ $attempts -ge 30 ]]; then
                     warn "Ollama did not start in time. Check with: brew services info ollama"
+                    ollama_ready=false
                     break
                 fi
                 sleep 1
             done
         fi
 
-        # Pull embedding model
-        info "Pulling mxbai-embed-large model (this may take a few minutes)..."
-        ollama pull mxbai-embed-large
-        INSTALLED_ITEMS+=("mxbai-embed-large model")
-        success "Ollama ready with mxbai-embed-large"
+        # Pull embedding model (skip if Ollama didn't start)
+        if [[ "$ollama_ready" == true ]]; then
+            info "Pulling mxbai-embed-large model (this may take a few minutes)..."
+            if ollama pull mxbai-embed-large; then
+                INSTALLED_ITEMS+=("mxbai-embed-large model")
+                success "Ollama ready with mxbai-embed-large"
+            else
+                warn "Failed to pull mxbai-embed-large. Run manually: ollama pull mxbai-embed-large"
+            fi
+        else
+            warn "Skipping model pull. Run manually: ollama pull mxbai-embed-large"
+        fi
     fi
 
     # --- Claude Code ---
     if [[ $INSTALL_CLAUDE_CODE -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Claude Code"
         brew install --cask claude-code
         CLAUDE_FRESH_INSTALL=true
@@ -869,7 +931,7 @@ phase_install() {
     if [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_SOSUMI -eq 1 || \
           $INSTALL_MCP_SERENA -eq 1 || $INSTALL_MCP_DOCS -eq 1 || \
           $INSTALL_MCP_OMNISEARCH -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Configuring MCP Servers"
 
         # Check if claude CLI is available
@@ -884,49 +946,49 @@ phase_install() {
 
             if [[ $INSTALL_MCP_XCODEBUILD -eq 1 ]]; then
                 info "Adding XcodeBuildMCP..."
-                claude_cli mcp add -s user \
+                if try_install "MCP: XcodeBuildMCP" claude_cli mcp add -s user \
                     -e XCODEBUILDMCP_SENTRY_DISABLED=1 \
-                    XcodeBuildMCP -- npx -y xcodebuildmcp@latest mcp 2>/dev/null || true
-                INSTALLED_ITEMS+=("MCP: XcodeBuildMCP")
-                success "XcodeBuildMCP configured"
+                    XcodeBuildMCP -- npx -y xcodebuildmcp@latest mcp; then
+                    success "XcodeBuildMCP configured"
+                fi
             fi
 
             if [[ $INSTALL_MCP_SOSUMI -eq 1 ]]; then
                 info "Adding Sosumi..."
-                claude_cli mcp add -s user \
+                if try_install "MCP: Sosumi" claude_cli mcp add -s user \
                     --transport http \
-                    sosumi https://sosumi.ai/mcp 2>/dev/null || true
-                INSTALLED_ITEMS+=("MCP: Sosumi")
-                success "Sosumi configured"
+                    sosumi https://sosumi.ai/mcp; then
+                    success "Sosumi configured"
+                fi
             fi
 
             if [[ $INSTALL_MCP_SERENA -eq 1 ]]; then
                 info "Adding Serena..."
-                claude_cli mcp add -s user \
+                if try_install "MCP: Serena" claude_cli mcp add -s user \
                     serena -- uvx --from "git+https://github.com/oraios/serena" \
-                    serena start-mcp-server --context=claude-code --project-from-cwd 2>/dev/null || true
-                INSTALLED_ITEMS+=("MCP: Serena")
-                success "Serena configured"
+                    serena start-mcp-server --context=claude-code --project-from-cwd; then
+                    success "Serena configured"
+                fi
             fi
 
             if [[ $INSTALL_MCP_DOCS -eq 1 ]]; then
                 info "Adding docs-mcp-server..."
-                claude_cli mcp add -s user \
+                if try_install "MCP: docs-mcp-server" claude_cli mcp add -s user \
                     -e OPENAI_API_KEY=ollama \
                     -e OPENAI_API_BASE=http://localhost:11434/v1 \
                     -e DOCS_MCP_EMBEDDING_MODEL=openai:mxbai-embed-large \
-                    docs-mcp-server -- npx -y @arabold/docs-mcp-server@latest --read-only --telemetry=false 2>/dev/null || true
-                INSTALLED_ITEMS+=("MCP: docs-mcp-server")
-                success "docs-mcp-server configured"
+                    docs-mcp-server -- npx -y @arabold/docs-mcp-server@latest --read-only --telemetry=false; then
+                    success "docs-mcp-server configured"
+                fi
             fi
 
             if [[ $INSTALL_MCP_OMNISEARCH -eq 1 ]]; then
                 info "Adding mcp-omnisearch..."
-                claude_cli mcp add -s user \
+                if try_install "MCP: mcp-omnisearch" claude_cli mcp add -s user \
                     -e "PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}" \
-                    mcp-omnisearch -- npx -y mcp-omnisearch 2>/dev/null || true
-                INSTALLED_ITEMS+=("MCP: mcp-omnisearch")
-                success "mcp-omnisearch configured"
+                    mcp-omnisearch -- npx -y mcp-omnisearch; then
+                    success "mcp-omnisearch configured"
+                fi
             fi
         fi
     fi
@@ -935,7 +997,7 @@ phase_install() {
     if [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 || $INSTALL_PLUGIN_PR_REVIEW -eq 1 || \
           $INSTALL_PLUGIN_SIMPLIFIER -eq 1 || $INSTALL_PLUGIN_RALPH -eq 1 || \
           $INSTALL_PLUGIN_HUD -eq 1 || $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Plugins"
 
         if ! check_command claude; then
@@ -951,51 +1013,57 @@ phase_install() {
 
             if [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 ]]; then
                 info "Installing explanatory-output-style..."
-                claude_cli plugin install explanatory-output-style@claude-plugins-official 2>/dev/null || true
-                INSTALLED_ITEMS+=("Plugin: explanatory-output-style")
-                success "explanatory-output-style installed"
+                if try_install "Plugin: explanatory-output-style" \
+                    claude_cli plugin install explanatory-output-style@claude-plugins-official; then
+                    success "explanatory-output-style installed"
+                fi
             fi
 
             if [[ $INSTALL_PLUGIN_PR_REVIEW -eq 1 ]]; then
                 info "Installing pr-review-toolkit..."
-                claude_cli plugin install pr-review-toolkit@claude-plugins-official 2>/dev/null || true
-                INSTALLED_ITEMS+=("Plugin: pr-review-toolkit")
-                success "pr-review-toolkit installed"
+                if try_install "Plugin: pr-review-toolkit" \
+                    claude_cli plugin install pr-review-toolkit@claude-plugins-official; then
+                    success "pr-review-toolkit installed"
+                fi
             fi
 
             if [[ $INSTALL_PLUGIN_SIMPLIFIER -eq 1 ]]; then
                 info "Installing code-simplifier..."
-                claude_cli plugin install code-simplifier@claude-plugins-official 2>/dev/null || true
-                INSTALLED_ITEMS+=("Plugin: code-simplifier")
-                success "code-simplifier installed"
+                if try_install "Plugin: code-simplifier" \
+                    claude_cli plugin install code-simplifier@claude-plugins-official; then
+                    success "code-simplifier installed"
+                fi
             fi
 
             if [[ $INSTALL_PLUGIN_RALPH -eq 1 ]]; then
                 info "Installing ralph-loop..."
-                claude_cli plugin install ralph-loop@claude-plugins-official 2>/dev/null || true
-                INSTALLED_ITEMS+=("Plugin: ralph-loop")
-                success "ralph-loop installed"
+                if try_install "Plugin: ralph-loop" \
+                    claude_cli plugin install ralph-loop@claude-plugins-official; then
+                    success "ralph-loop installed"
+                fi
             fi
 
             if [[ $INSTALL_PLUGIN_HUD -eq 1 ]]; then
                 info "Installing claude-hud..."
-                claude_cli plugin install claude-hud@claude-hud 2>/dev/null || true
-                INSTALLED_ITEMS+=("Plugin: claude-hud")
-                success "claude-hud installed"
+                if try_install "Plugin: claude-hud" \
+                    claude_cli plugin install claude-hud@claude-hud; then
+                    success "claude-hud installed"
+                fi
             fi
 
             if [[ $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]; then
                 info "Installing claude-md-management..."
-                claude_cli plugin install claude-md-management@claude-plugins-official 2>/dev/null || true
-                INSTALLED_ITEMS+=("Plugin: claude-md-management")
-                success "claude-md-management installed"
+                if try_install "Plugin: claude-md-management" \
+                    claude_cli plugin install claude-md-management@claude-plugins-official; then
+                    success "claude-md-management installed"
+                fi
             fi
         fi
     fi
 
     # --- Skills ---
     if [[ $INSTALL_SKILL_LEARNING -eq 1 || $INSTALL_SKILL_XCODEBUILD -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Skills"
 
         if [[ $INSTALL_SKILL_LEARNING -eq 1 ]]; then
@@ -1003,30 +1071,29 @@ phase_install() {
             mkdir -p "$CLAUDE_SKILLS_DIR/continuous-learning/references"
             cp "$SCRIPT_DIR/skills/continuous-learning/SKILL.md" \
                "$CLAUDE_SKILLS_DIR/continuous-learning/SKILL.md"
+            manifest_record "skills/continuous-learning/SKILL.md"
             cp "$SCRIPT_DIR/skills/continuous-learning/references/templates.md" \
                "$CLAUDE_SKILLS_DIR/continuous-learning/references/templates.md"
+            manifest_record "skills/continuous-learning/references/templates.md"
             INSTALLED_ITEMS+=("Skill: continuous-learning")
             success "continuous-learning skill installed"
         fi
 
         if [[ $INSTALL_SKILL_XCODEBUILD -eq 1 ]]; then
             info "Installing xcodebuildmcp skill..."
-            npx skills add cameroncooke/xcodebuildmcp 2>/dev/null || {
-                warn "Failed to install xcodebuildmcp skill via npx. You can try manually: npx skills add cameroncooke/xcodebuildmcp"
-            }
-            # Symlink into claude skills if installed in ~/.agents/skills
-            if [[ -d "$HOME/.agents/skills/xcodebuildmcp" ]] && [[ ! -e "$CLAUDE_SKILLS_DIR/xcodebuildmcp" ]]; then
-                ln -sf "$HOME/.agents/skills/xcodebuildmcp" "$CLAUDE_SKILLS_DIR/xcodebuildmcp"
+            if try_install "Skill: xcodebuildmcp" \
+                npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y; then
+                success "xcodebuildmcp skill installed"
+            else
+                info "You can try manually: npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y"
             fi
-            INSTALLED_ITEMS+=("Skill: xcodebuildmcp")
-            success "xcodebuildmcp skill installed"
         fi
 
     fi
 
     # --- Commands ---
     if [[ $INSTALL_CMD_PR -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Commands"
 
         local commands_dir="$HOME/.claude/commands"
@@ -1037,8 +1104,11 @@ phase_install() {
             cp "$SCRIPT_DIR/commands/pr.md" "$commands_dir/pr.md"
             # Replace user name placeholder if provided
             if [[ -n "$USER_NAME" ]]; then
-                sed -i '' "s/__USER_NAME__/${USER_NAME}/g" "$commands_dir/pr.md"
+                local safe_user
+                safe_user=$(sed_escape "$USER_NAME")
+                sed -i '' "s/__USER_NAME__/${safe_user}/g" "$commands_dir/pr.md"
             fi
+            manifest_record "commands/pr.md"
             INSTALLED_ITEMS+=("Command: /pr")
             success "/pr command installed"
         fi
@@ -1046,16 +1116,18 @@ phase_install() {
 
     # --- Hooks ---
     if [[ $INSTALL_HOOKS -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Hooks"
 
         mkdir -p "$CLAUDE_HOOKS_DIR"
 
         cp "$SCRIPT_DIR/hooks/session_start.sh" "$CLAUDE_HOOKS_DIR/session_start.sh"
         chmod +x "$CLAUDE_HOOKS_DIR/session_start.sh"
+        manifest_record "hooks/session_start.sh"
 
         cp "$SCRIPT_DIR/hooks/continuous-learning-activator.sh" "$CLAUDE_HOOKS_DIR/continuous-learning-activator.sh"
         chmod +x "$CLAUDE_HOOKS_DIR/continuous-learning-activator.sh"
+        manifest_record "hooks/continuous-learning-activator.sh"
 
         INSTALLED_ITEMS+=("Hooks: session_start + continuous-learning-activator")
         success "Hooks installed"
@@ -1063,7 +1135,7 @@ phase_install() {
 
     # --- Settings ---
     if [[ $INSTALL_SETTINGS -eq 1 ]]; then
-        ((current_step++))
+        current_step=$((current_step + 1))
         step $current_step $total_steps "Applying Settings"
 
         if [[ -f "$CLAUDE_SETTINGS" ]]; then
@@ -1071,10 +1143,14 @@ phase_install() {
             # Merge settings: our config on top of existing
             if check_command jq; then
                 local merged
-                merged=$(jq -s '.[0] * .[1]' "$CLAUDE_SETTINGS" "$SCRIPT_DIR/config/settings.json" 2>/dev/null) || {
-                    warn "Failed to merge settings. Overwriting with new settings."
+                local merge_err
+                if merge_err=$(jq -s '.[0] * .[1]' "$CLAUDE_SETTINGS" "$SCRIPT_DIR/config/settings.json" 2>&1); then
+                    merged="$merge_err"
+                else
+                    warn "Failed to merge settings: $merge_err"
+                    warn "Previous settings backed up. Overwriting with new settings."
                     merged=$(cat "$SCRIPT_DIR/config/settings.json")
-                }
+                fi
                 echo "$merged" > "$CLAUDE_SETTINGS"
             else
                 cp "$SCRIPT_DIR/config/settings.json" "$CLAUDE_SETTINGS"
@@ -1146,12 +1222,12 @@ phase_summary_post() {
 
     echo -e "    ${step_num}. ${BOLD}Restart your terminal${NC} to pick up PATH changes"
     echo ""
-    ((step_num++))
+    step_num=$((step_num + 1))
 
     if [[ "$CLAUDE_FRESH_INSTALL" == "true" ]]; then
         echo -e "    ${step_num}. Run ${BOLD}claude${NC} and authenticate with your Anthropic account"
         echo ""
-        ((step_num++))
+        step_num=$((step_num + 1))
     fi
 
     echo -e "    ${step_num}. Configure ${BOLD}CLAUDE.local.md${NC} for your iOS project(s)"
@@ -1174,13 +1250,13 @@ phase_summary_post() {
     fi
     echo ""
 
-    ((step_num++))
+    step_num=$((step_num + 1))
 
     if [[ "$PERPLEXITY_API_KEY" == "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
         echo -e "    ${step_num}. Add your Perplexity API key to mcp-omnisearch:"
         echo -e "       Edit ${BOLD}~/.claude.json${NC} → mcpServers → mcp-omnisearch → env → PERPLEXITY_API_KEY"
         echo ""
-        ((step_num++))
+        step_num=$((step_num + 1))
     fi
 
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1245,7 +1321,11 @@ phase_doctor() {
     echo -e "${BOLD}  MCP Servers${NC} ${DIM}(in ~/.claude.json)${NC}"
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
-    if [[ -f "$CLAUDE_JSON" ]]; then
+    if [[ ! -f "$CLAUDE_JSON" ]]; then
+        doc_fail "~/.claude.json not found — Claude Code may not be configured"
+    elif ! check_command jq; then
+        doc_warn "jq not installed — cannot inspect ~/.claude.json"
+    else
         local mcp_servers=("XcodeBuildMCP" "sosumi" "serena" "docs-mcp-server" "mcp-omnisearch")
         for server in "${mcp_servers[@]}"; do
             if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
@@ -1257,14 +1337,12 @@ phase_doctor() {
 
         # Check Perplexity API key
         local perp_key
-        perp_key=$(jq -r '.mcpServers."mcp-omnisearch".env.PERPLEXITY_API_KEY // ""' "$CLAUDE_JSON" 2>/dev/null)
+        perp_key=$(jq -r '.mcpServers."mcp-omnisearch".env.PERPLEXITY_API_KEY // ""' "$CLAUDE_JSON" 2>/dev/null) || perp_key=""
         if [[ "$perp_key" == "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
             doc_warn "mcp-omnisearch: Perplexity API key is still a placeholder"
         elif [[ -z "$perp_key" ]] && jq -e '.mcpServers."mcp-omnisearch"' "$CLAUDE_JSON" >/dev/null 2>&1; then
             doc_warn "mcp-omnisearch: Perplexity API key is empty"
         fi
-    else
-        doc_fail "~/.claude.json not found — Claude Code may not be configured"
     fi
     echo ""
 
@@ -1272,7 +1350,11 @@ phase_doctor() {
     echo -e "${BOLD}  Plugins${NC} ${DIM}(in ~/.claude/settings.json)${NC}"
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
-    if [[ -f "$CLAUDE_SETTINGS" ]]; then
+    if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
+        doc_fail "~/.claude/settings.json not found"
+    elif ! check_command jq; then
+        doc_warn "jq not installed — cannot inspect settings"
+    else
         local plugins=(
             "explanatory-output-style@claude-plugins-official"
             "pr-review-toolkit@claude-plugins-official"
@@ -1289,8 +1371,6 @@ phase_doctor() {
                 doc_skip "$short_name — not enabled"
             fi
         done
-    else
-        doc_fail "~/.claude/settings.json not found"
     fi
     echo ""
 
@@ -1393,6 +1473,102 @@ phase_doctor() {
         done
     else
         doc_fail "~/.config/git/ignore not found"
+    fi
+    echo ""
+
+    # ===== Installed File Freshness =====
+    echo -e "${BOLD}  Installed Files${NC} ${DIM}(vs source repo)${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────────${NC}"
+
+    # Determine source repo location
+    local src_dir=""
+    if [[ -f "$SETUP_MANIFEST" ]]; then
+        src_dir=$(grep "^SCRIPT_DIR=" "$SETUP_MANIFEST" 2>/dev/null | cut -d'=' -f2-)
+    fi
+    # Fall back to current SCRIPT_DIR (we're running from the repo)
+    if [[ -z "$src_dir" || ! -d "$src_dir" ]]; then
+        src_dir="$SCRIPT_DIR"
+    fi
+
+    if [[ ! -d "$src_dir" ]]; then
+        doc_warn "Source repo not found"
+    else
+        # Plain-copy files: can compare source vs installed directly
+        local -a direct_files=(
+            "hooks/session_start.sh|$CLAUDE_HOOKS_DIR/session_start.sh"
+            "hooks/continuous-learning-activator.sh|$CLAUDE_HOOKS_DIR/continuous-learning-activator.sh"
+            "skills/continuous-learning/SKILL.md|$CLAUDE_SKILLS_DIR/continuous-learning/SKILL.md"
+            "skills/continuous-learning/references/templates.md|$CLAUDE_SKILLS_DIR/continuous-learning/references/templates.md"
+        )
+        # sed-modified files: need manifest hash (can't compare directly)
+        local -a manifest_files=(
+            "commands/pr.md|$HOME/.claude/commands/pr.md"
+        )
+        local outdated_count=0
+
+        # Check plain-copy files via direct diff
+        for entry in "${direct_files[@]}"; do
+            local rel_path="${entry%%|*}"
+            local installed_path="${entry##*|}"
+            local short_name
+            short_name=$(basename "$rel_path")
+            local src_file="$src_dir/$rel_path"
+
+            if [[ ! -f "$installed_path" ]]; then
+                continue  # Not installed — already reported in its own section
+            fi
+            if [[ ! -f "$src_file" ]]; then
+                doc_warn "$short_name — source missing from repo"
+                continue
+            fi
+
+            if diff -q "$src_file" "$installed_path" >/dev/null 2>&1; then
+                doc_pass "$short_name"
+            else
+                doc_fail "$short_name — outdated (source differs from installed)"
+                outdated_count=$((outdated_count + 1))
+            fi
+        done
+
+        # Check sed-modified files via manifest hash
+        for entry in "${manifest_files[@]}"; do
+            local rel_path="${entry%%|*}"
+            local installed_path="${entry##*|}"
+            local short_name
+            short_name=$(basename "$rel_path")
+            local src_file="$src_dir/$rel_path"
+
+            if [[ ! -f "$installed_path" ]]; then
+                continue
+            fi
+            if [[ ! -f "$src_file" ]]; then
+                doc_warn "$short_name — source missing from repo"
+                continue
+            fi
+
+            if [[ -f "$SETUP_MANIFEST" ]]; then
+                local stored_hash
+                stored_hash=$(grep "^${rel_path}=" "$SETUP_MANIFEST" 2>/dev/null | cut -d'=' -f2-) || stored_hash=""
+                local current_src_hash
+                current_src_hash=$(file_hash "$src_file")
+
+                if [[ -z "$stored_hash" ]]; then
+                    doc_warn "$short_name — not tracked (re-run setup to track)"
+                elif [[ "$stored_hash" != "$current_src_hash" ]]; then
+                    doc_fail "$short_name — outdated (source updated since install)"
+                    outdated_count=$((outdated_count + 1))
+                else
+                    doc_pass "$short_name"
+                fi
+            else
+                doc_warn "$short_name — no manifest (re-run setup to track)"
+            fi
+        done
+
+        if [[ $outdated_count -gt 0 ]]; then
+            echo ""
+            echo -e "  ${YELLOW}Run ${BOLD}${src_dir}/setup.sh${NC}${YELLOW} to update outdated files.${NC}"
+        fi
     fi
     echo ""
 
