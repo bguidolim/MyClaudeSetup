@@ -350,7 +350,7 @@ configure_project() {
     # 1. Xcode project: remove EDIT comment, replace placeholder
     sed -i '' '/<!-- EDIT: Set your .xcodeproj and default scheme below -->/d' "$dest"
     local xcode_escaped
-    xcode_escaped=$(sed_escape "${xcode_project//./\\.}")
+    xcode_escaped=$(sed_escape "$xcode_project")
     sed -i '' "s/__PROJECT__\.xcodeproj/${xcode_escaped}/g" "$dest"
 
     # 2. Branch naming: remove EDIT comment, replace placeholder
