@@ -106,22 +106,22 @@ After running the setup script, configure each iOS project:
 
 ### 1. Add CLAUDE.local.md
 
-The automated way (recommended):
+If you cloned the repo:
 
 ```bash
-cd /path/to/your/project
-~/Developer/my-claude-ios-setup/setup.sh --configure-project
+cd my-claude-ios-setup
+./setup.sh --configure-project
+```
+
+If you used the one-line installer, clone and run:
+
+```bash
+git clone https://github.com/bguidolim/my-claude-ios-setup.git
+cd my-claude-ios-setup
+./setup.sh --configure-project
 ```
 
 This auto-detects your Xcode project, asks for your name, generates `CLAUDE.local.md` with placeholders filled in, and creates `.xcodebuildmcp/config.yaml`.
-
-Or manually:
-
-```bash
-cp ~/Developer/my-claude-ios-setup/templates/CLAUDE.local.md /path/to/your/project/CLAUDE.local.md
-```
-
-Edit the template — replace `__PROJECT__` placeholders and set your branch naming convention.
 
 ### 2. Authenticate Claude Code
 
@@ -178,11 +178,11 @@ npx skills add github-user/skill-repo
 # Check if Ollama is running
 curl http://localhost:11434/api/tags
 
-# Start as brew service
+# Start Ollama (Homebrew install)
 brew services start ollama
 
-# Check service status
-brew services info ollama
+# Start Ollama (manual install)
+ollama serve
 ```
 
 ### MCP servers not appearing

@@ -23,7 +23,9 @@ allowed-tools:
   - mcp__sosumi__searchAppleDocumentation
   - mcp__sosumi__fetchAppleDocumentation
   - AskUserQuestion
-  - TodoWrite
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
 ---
 
 # Continuous Learning Skill
