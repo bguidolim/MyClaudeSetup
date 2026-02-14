@@ -239,6 +239,14 @@ mcp_add() {
     claude_cli mcp add -s user "$name" "$@"
 }
 
+# Check if Ollama service is running and the embedding model is available
+ollama_fully_ready() {
+    check_command ollama || return 1
+    local tags
+    tags=$(curl -s --max-time 3 http://localhost:11434/api/tags 2>/dev/null) || return 1
+    echo "$tags" | grep -q "nomic-embed-text"
+}
+
 # ---------------------------------------------------------------------------
 # Configure CLAUDE.local.md for a project
 # ---------------------------------------------------------------------------
@@ -858,10 +866,19 @@ phase_install() {
     # Initialize manifest for tracking installed file versions
     manifest_init
 
+    # Pre-check: does Ollama actually need any setup work?
+    # Skip the entire Ollama step when service is already running with the model.
+    local ollama_setup_needed=false
+    if [[ $INSTALL_OLLAMA -eq 1 ]]; then
+        ollama_setup_needed=true
+    elif [[ $INSTALL_MCP_DOCS -eq 1 ]] && ! ollama_fully_ready; then
+        ollama_setup_needed=true
+    fi
+
     # Count total steps (using $((x + 1)) instead of ((x++)) for bash 3.2 / set -e safety)
     [[ $INSTALL_HOMEBREW -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_NODE -eq 1 || $INSTALL_JQ -eq 1 || $INSTALL_GH -eq 1 || $INSTALL_UV -eq 1 ]] && total_steps=$((total_steps + 1))
-    [[ $INSTALL_OLLAMA -eq 1 || $INSTALL_MCP_DOCS -eq 1 ]] && total_steps=$((total_steps + 1))
+    [[ "$ollama_setup_needed" == true ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_CLAUDE_CODE -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_SOSUMI -eq 1 || $INSTALL_MCP_SERENA -eq 1 || \
        $INSTALL_MCP_DOCS -eq 1 || $INSTALL_MCP_OMNISEARCH -eq 1 ]] && total_steps=$((total_steps + 1))
@@ -936,28 +953,34 @@ phase_install() {
         fi
     fi
 
-    # Ensure Ollama is running as a brew service whenever docs-mcp-server is selected.
-    # This covers both fresh installs and re-runs where Ollama is installed but not started.
-    if [[ $INSTALL_MCP_DOCS -eq 1 ]] && check_command ollama; then
+    # Ensure Ollama is running with the embedding model whenever docs-mcp-server is selected.
+    # Skipped entirely when Ollama is already running with nomic-embed-text (ollama_fully_ready).
+    if [[ "$ollama_setup_needed" == true ]] && check_command ollama; then
         if [[ $INSTALL_OLLAMA -ne 1 ]]; then
             current_step=$((current_step + 1))
             step $current_step $total_steps "Setting up Ollama"
         fi
 
-        # Register Ollama as a brew service (auto-starts on login)
-        if ! brew services list 2>/dev/null | grep -q "ollama.*started"; then
-            info "Starting Ollama as a brew service..."
-            brew services start ollama
-        fi
-
-        # Wait for Ollama to be ready
+        # Start Ollama if not already responding
         local ollama_ready=true
         if ! curl -s --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+            # Try brew services only if Ollama was installed via Homebrew
+            if brew list ollama &>/dev/null; then
+                if ! brew services list 2>/dev/null | grep -q "ollama.*started"; then
+                    info "Starting Ollama as a brew service..."
+                    brew services start ollama
+                fi
+            else
+                warn "Ollama is installed but not running."
+                warn "Start it manually (e.g. 'ollama serve') and re-run setup."
+            fi
+
+            # Wait for Ollama to be ready
             local attempts=0
             while ! curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; do
                 attempts=$((attempts + 1))
                 if [[ $attempts -ge 30 ]]; then
-                    warn "Ollama did not start in time. Check with: brew services info ollama"
+                    warn "Ollama did not start in time."
                     ollama_ready=false
                     break
                 fi
@@ -1388,22 +1411,18 @@ phase_doctor() {
     check_command uvx    && doc_pass "uv"              || doc_fail "uv — not found (needed for Serena)"
     check_command claude && doc_pass "Claude Code"     || doc_fail "Claude Code — not found"
 
-    # Ollama: check command + brew service + model
+    # Ollama: check command + service running + model
     if check_command ollama; then
         doc_pass "Ollama"
-        if brew services list 2>/dev/null | grep -q "ollama.*started"; then
-            doc_pass "Ollama brew service running"
-        else
-            doc_fail "Ollama brew service not running — run: brew services start ollama"
-        fi
-        if curl -s --max-time 3 http://localhost:11434/api/tags 2>/dev/null | grep -q "nomic-embed-text"; then
-            doc_pass "nomic-embed-text model"
-        else
-            if curl -s --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
-                doc_fail "nomic-embed-text model not found — run: ollama pull nomic-embed-text"
+        if curl -s --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+            doc_pass "Ollama service running"
+            if curl -s --max-time 3 http://localhost:11434/api/tags 2>/dev/null | grep -q "nomic-embed-text"; then
+                doc_pass "nomic-embed-text model"
             else
-                doc_fail "Ollama not responding — service may need restart"
+                doc_fail "nomic-embed-text model not found — run: ollama pull nomic-embed-text"
             fi
+        else
+            doc_fail "Ollama not responding — start it with 'brew services start ollama' or 'ollama serve'"
         fi
     else
         doc_fail "Ollama — not found"
