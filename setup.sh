@@ -94,6 +94,7 @@ CLAUDE_FRESH_INSTALL=false
 # Source library modules
 # ---------------------------------------------------------------------------
 source "$SCRIPT_DIR/lib/utils.sh"
+source "$SCRIPT_DIR/lib/fixes.sh"
 source "$SCRIPT_DIR/lib/configure.sh"
 source "$SCRIPT_DIR/lib/phases.sh"
 source "$SCRIPT_DIR/lib/doctor.sh"
