@@ -323,7 +323,30 @@ phase_doctor() {
 
         # CLAUDE.local.md
         if [[ -f "$project_dir/CLAUDE.local.md" ]]; then
-            doc_pass "CLAUDE.local.md"
+            local claude_local_ok=true
+
+            # Check for unsubstituted placeholders
+            if grep -qE '__REPO_NAME__|__PROJECT__|__USER_NAME__' "$project_dir/CLAUDE.local.md" 2>/dev/null; then
+                doc_warn "CLAUDE.local.md — has unsubstituted placeholders"
+                claude_local_ok=false
+            fi
+
+            # Check template freshness via embedded hash
+            local stored_tmpl_hash current_tmpl_hash
+            stored_tmpl_hash=$(sed -n 's/.*<!-- template-hash:\([a-f0-9]*\) -->.*/\1/p' "$project_dir/CLAUDE.local.md" 2>/dev/null) || stored_tmpl_hash=""
+            current_tmpl_hash=$(file_hash "$SCRIPT_DIR/templates/CLAUDE.local.md" 2>/dev/null) || current_tmpl_hash=""
+
+            if [[ -n "$current_tmpl_hash" && -n "$stored_tmpl_hash" && "$stored_tmpl_hash" != "$current_tmpl_hash" ]]; then
+                doc_fail "CLAUDE.local.md — outdated (template updated since generation). Re-run: ${SCRIPT_DIR}/setup.sh configure-project"
+                claude_local_ok=false
+            elif [[ -n "$current_tmpl_hash" && -z "$stored_tmpl_hash" ]]; then
+                doc_warn "CLAUDE.local.md — no template hash (re-generate to enable freshness tracking)"
+                claude_local_ok=false
+            fi
+
+            if $claude_local_ok; then
+                doc_pass "CLAUDE.local.md"
+            fi
         else
             doc_fail "CLAUDE.local.md — not found. Run: ${SCRIPT_DIR}/setup.sh configure-project"
         fi

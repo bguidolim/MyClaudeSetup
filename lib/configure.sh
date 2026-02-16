@@ -71,8 +71,8 @@ configure_project() {
         echo -ne "  > "
         read -r user_name
         if [[ -z "$user_name" ]]; then
-            warn "No name entered — template will keep the placeholder."
-            user_name='<your-name>'
+            user_name='feature'
+            info "Defaulting branch prefix to: ${BOLD}${user_name}${NC}"
         else
             # Store globally for subsequent project configs
             USER_NAME="$user_name"
@@ -104,9 +104,22 @@ configure_project() {
 
     cp "$SCRIPT_DIR/templates/CLAUDE.local.md" "$dest"
 
+    # Stamp the template hash so doctor can detect drift
+    local template_hash
+    template_hash=$(file_hash "$SCRIPT_DIR/templates/CLAUDE.local.md")
+    echo "" >> "$dest"
+    echo "<!-- template-hash:${template_hash} -->" >> "$dest"
+
     # --- Apply edits ---
 
-    # 1. Xcode project: remove EDIT comment, replace placeholder
+    # 1. Repo name for docs-mcp-server library (matches session_start.sh convention)
+    local repo_name
+    repo_name=$(basename "$(git -C "$project_path" rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || basename "$project_path")
+    local repo_escaped
+    repo_escaped=$(sed_escape "$repo_name")
+    sed -i '' "s/__REPO_NAME__/${repo_escaped}/g" "$dest"
+
+    # 2. Xcode project: remove EDIT comment, replace placeholder
     sed -i '' '/<!-- EDIT: Set your .xcodeproj and default scheme below -->/d' "$dest"
     local xcode_escaped
     xcode_escaped=$(sed_escape "$xcode_project")
@@ -116,7 +129,7 @@ configure_project() {
     sed -i '' '/<!-- EDIT: Set your branch naming convention below -->/d' "$dest"
     local safe_name
     safe_name=$(sed_escape "$user_name")
-    sed -i '' "s/<your-name>/${safe_name}/g" "$dest"
+    sed -i '' "s/__USER_NAME__/${safe_name}/g" "$dest"
 
     # 3. CLAUDE.md symlink
     if [[ "$has_symlink" == true ]]; then
@@ -165,6 +178,7 @@ configure_project() {
     echo ""
     success "Project configured: ${project_path}"
     echo -e "    Xcode project:      ${BOLD}${xcode_project}${NC}"
+    echo -e "    Docs library:       ${BOLD}${repo_name}${NC}"
     echo -e "    Branch prefix:      ${BOLD}${user_name}/{ticket-and-small-title}${NC}"
     echo -e "    XcodeBuildMCP:      ${BOLD}.xcodebuildmcp/config.yaml${NC}"
     if [[ "$has_symlink" == true ]]; then

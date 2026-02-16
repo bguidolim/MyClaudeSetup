@@ -7,7 +7,7 @@
 
 Before writing code, planning, or exploring — **always do these two steps first**:
 
-1. **Search the KB** — call `search_docs` with keywords relevant to the task (module, feature, concept). It indexes both documentation and Serena memories in a single semantic search. Try multiple keyword variations if needed.
+1. **Search the KB** — call `search_docs` with library `__REPO_NAME__` and keywords relevant to the task (module, feature, concept). It indexes both documentation and Serena memories in a single semantic search. Try multiple keyword variations if needed.
 2. **Read matching memories** — use Serena `read_memory` on any relevant results to get full context (architecture decisions, gotchas, patterns from past sessions).
 
 Only after these steps, proceed with Serena tools, Glob, or other discovery.
@@ -46,7 +46,7 @@ The `xcode-ide` workflow is enabled via `.xcodebuildmcp/config.yaml`, providing 
 
 ## Git & GitHub
 <!-- EDIT: Set your branch naming convention below -->
-- Branch naming: `<your-name>/{ticket-and-small-title}`
+- Branch naming: `__USER_NAME__/{ticket-and-small-title}`
 - **Never commit without being asked**
 - Use `gh` command for GitHub queries (auth already configured)
 
