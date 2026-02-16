@@ -18,24 +18,62 @@ phase_doctor() {
     local warn_count=0
     local fixed=0
 
-    doc_pass()  { echo -e "  ${GREEN}✓${NC} $1"; pass=$((pass + 1)); }
-    doc_fail()  { echo -e "  ${RED}✗${NC} $1"; fail=$((fail + 1)); }
-    doc_warn()  { echo -e "  ${YELLOW}!${NC} $1"; warn_count=$((warn_count + 1)); }
-    doc_skip()  { echo -e "  ${DIM}○ $1${NC}"; }
-    doc_fixed() { echo -e "  ${GREEN}✓${NC} $1 ${CYAN}(fixed)${NC}"; fixed=$((fixed + 1)); pass=$((pass + 1)); }
+    doc_pass()       { echo -e "  ${GREEN}✓${NC} $1"; pass=$((pass + 1)); }
+    doc_fail()       { echo -e "  ${RED}✗${NC} $1"; fail=$((fail + 1)); }
+    doc_warn()       { echo -e "  ${YELLOW}!${NC} $1"; warn_count=$((warn_count + 1)); }
+    doc_skip()       { echo -e "  ${DIM}○ $1${NC}"; }
+    doc_fixed()      { echo -e "  ${GREEN}✓${NC} $1 ${CYAN}(fixed)${NC}"; fixed=$((fixed + 1)); pass=$((pass + 1)); }
+    doc_fix_failed() { echo -e "  ${RED}✗${NC} $1 ${YELLOW}(fix failed)${NC}"; fail=$((fail + 1)); }
+
+    # Ensure brew is on PATH before dependency checks
+    ensure_brew_in_path
 
     # ===== Dependencies =====
     echo -e "${BOLD}  Dependencies${NC}"
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
-    check_command brew   && doc_pass "Homebrew"        || doc_fail "Homebrew — not found"
-    check_command node   && doc_pass "Node.js ($(node -v 2>/dev/null))" || doc_fail "Node.js — not found"
-    check_command jq     && doc_pass "jq"              || doc_fail "jq — not found"
-    check_command gh     && doc_pass "gh (GitHub CLI)"  || doc_fail "gh — not found"
-    check_command uvx    && doc_pass "uv"              || doc_fail "uv — not found (needed for Serena)"
-    check_command claude && doc_pass "Claude Code"     || doc_fail "Claude Code — not found"
+    # Homebrew — cannot auto-fix (interactive installer)
+    check_command brew && doc_pass "Homebrew" || doc_fail "Homebrew — not found (install from https://brew.sh)"
 
-    # Ollama: check command + service running + model
+    # Brew packages — auto-fix only if brew exists AND dep is needed
+    local brew_deps=("node:node" "jq:jq" "gh:gh" "uvx:uv")
+    for dep_entry in "${brew_deps[@]}"; do
+        local cmd="${dep_entry%%:*}"
+        local pkg="${dep_entry##*:}"
+        if check_command "$cmd"; then
+            if [[ "$cmd" == "node" ]]; then
+                doc_pass "Node.js ($(node -v 2>/dev/null))"
+            elif [[ "$cmd" == "gh" ]]; then
+                doc_pass "gh (GitHub CLI)"
+            elif [[ "$cmd" == "uvx" ]]; then
+                doc_pass "uv"
+            else
+                doc_pass "$pkg"
+            fi
+        else
+            local label="$pkg"
+            [[ "$cmd" == "node" ]] && label="Node.js"
+            [[ "$cmd" == "gh" ]] && label="gh (GitHub CLI)"
+            [[ "$cmd" == "uvx" ]] && label="uv"
+
+            if [[ "$doctor_fix" == "true" ]] && check_command brew && dep_needed "$cmd"; then
+                if fix_brew_package "$pkg" >/dev/null 2>&1; then
+                    doc_fixed "$label"
+                else
+                    doc_fix_failed "$label — brew install $pkg failed"
+                fi
+            elif dep_needed "$cmd"; then
+                doc_fail "$label — not found"
+            else
+                doc_skip "$label — not needed by installed components"
+            fi
+        fi
+    done
+
+    # Claude Code — cannot auto-fix (needs cask + auth)
+    check_command claude && doc_pass "Claude Code" || doc_fail "Claude Code — not found"
+
+    # Ollama: command + service + model
     if check_command ollama; then
         doc_pass "Ollama"
         if curl -s --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
@@ -43,13 +81,59 @@ phase_doctor() {
             if curl -s --max-time 3 http://localhost:11434/api/tags 2>/dev/null | grep -q "nomic-embed-text"; then
                 doc_pass "nomic-embed-text model"
             else
-                doc_fail "nomic-embed-text model not found — run: ollama pull nomic-embed-text"
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_ollama_model "nomic-embed-text" >/dev/null 2>&1; then
+                        doc_fixed "nomic-embed-text model"
+                    else
+                        doc_fix_failed "nomic-embed-text model — ollama pull failed"
+                    fi
+                else
+                    doc_fail "nomic-embed-text model not found — run: ollama pull nomic-embed-text"
+                fi
             fi
         else
-            doc_fail "Ollama not responding — start it with 'brew services start ollama' or 'ollama serve'"
+            if [[ "$doctor_fix" == "true" ]]; then
+                if fix_ollama_start >/dev/null 2>&1; then
+                    doc_fixed "Ollama service started"
+                    # Now check/pull model
+                    if curl -s --max-time 3 http://localhost:11434/api/tags 2>/dev/null | grep -q "nomic-embed-text"; then
+                        doc_pass "nomic-embed-text model"
+                    else
+                        if fix_ollama_model "nomic-embed-text" >/dev/null 2>&1; then
+                            doc_fixed "nomic-embed-text model"
+                        else
+                            doc_fix_failed "nomic-embed-text model — ollama pull failed"
+                        fi
+                    fi
+                else
+                    doc_fix_failed "Ollama service — could not start (try 'ollama serve' manually)"
+                fi
+            else
+                doc_fail "Ollama not responding — start it with 'brew services start ollama' or 'ollama serve'"
+            fi
         fi
     else
-        doc_fail "Ollama — not found"
+        if [[ "$doctor_fix" == "true" ]] && check_command brew && dep_needed "ollama"; then
+            if fix_brew_package "ollama" >/dev/null 2>&1; then
+                doc_fixed "Ollama installed"
+                if fix_ollama_start >/dev/null 2>&1; then
+                    doc_fixed "Ollama service started"
+                    if fix_ollama_model "nomic-embed-text" >/dev/null 2>&1; then
+                        doc_fixed "nomic-embed-text model"
+                    else
+                        doc_fix_failed "nomic-embed-text model — ollama pull failed"
+                    fi
+                else
+                    doc_fix_failed "Ollama service — could not start"
+                fi
+            else
+                doc_fix_failed "Ollama — brew install failed"
+            fi
+        elif dep_needed "ollama"; then
+            doc_fail "Ollama — not found"
+        else
+            doc_skip "Ollama — not needed by installed components"
+        fi
     fi
     echo ""
 
@@ -87,10 +171,21 @@ phase_doctor() {
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
     if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
-        doc_fail "~/.claude/settings.json not found"
+        if [[ "$doctor_fix" == "true" ]]; then
+            if fix_settings_merge 2>/dev/null; then
+                doc_fixed "~/.claude/settings.json created"
+            else
+                doc_fix_failed "~/.claude/settings.json — could not create"
+            fi
+        else
+            doc_fail "~/.claude/settings.json not found"
+        fi
     elif ! check_command jq; then
         doc_warn "jq not installed — cannot inspect settings"
-    else
+    fi
+
+    # Only check plugins if settings file exists now
+    if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq; then
         local plugins=(
             "explanatory-output-style@claude-plugins-official"
             "pr-review-toolkit@claude-plugins-official"
@@ -117,7 +212,20 @@ phase_doctor() {
     if [[ -f "$CLAUDE_SKILLS_DIR/continuous-learning/SKILL.md" ]]; then
         doc_pass "continuous-learning"
     else
-        doc_skip "continuous-learning — not installed"
+        # Check manifest to see if it was previously installed
+        if [[ -f "$SETUP_MANIFEST" ]] && grep -q "^skills/continuous-learning/SKILL.md=" "$SETUP_MANIFEST" 2>/dev/null; then
+            if [[ "$doctor_fix" == "true" ]]; then
+                if fix_skill_learning 2>/dev/null; then
+                    doc_fixed "continuous-learning"
+                else
+                    doc_fix_failed "continuous-learning — could not copy files"
+                fi
+            else
+                doc_fail "continuous-learning — was installed but files are missing"
+            fi
+        else
+            doc_skip "continuous-learning — not installed"
+        fi
     fi
 
     if [[ -e "$CLAUDE_SKILLS_DIR/xcodebuildmcp" ]]; then
@@ -153,25 +261,52 @@ phase_doctor() {
             if [[ -x "$hook_path" ]]; then
                 doc_pass "$hook"
             else
-                doc_warn "$hook — exists but not executable"
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_hook_executable "$hook_path"; then
+                        doc_fixed "$hook (made executable)"
+                    else
+                        doc_fix_failed "$hook — chmod +x failed"
+                    fi
+                else
+                    doc_warn "$hook — exists but not executable"
+                fi
             fi
         else
-            doc_skip "$hook — not installed"
+            # Check manifest to see if it was previously installed
+            if [[ -f "$SETUP_MANIFEST" ]] && grep -q "^hooks/${hook}=" "$SETUP_MANIFEST" 2>/dev/null; then
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_hook_copy "$hook" 2>/dev/null; then
+                        doc_fixed "$hook"
+                    else
+                        doc_fix_failed "$hook — could not copy from source"
+                    fi
+                else
+                    doc_fail "$hook — was installed but file is missing"
+                fi
+            else
+                doc_skip "$hook — not installed"
+            fi
         fi
     done
 
     # Check settings.json has hook entries
-    if [[ -f "$CLAUDE_SETTINGS" ]]; then
-        if jq -e '.hooks.SessionStart' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
-            doc_pass "SessionStart hook registered in settings"
-        else
-            doc_warn "SessionStart hook not registered in settings.json"
-        fi
-        if jq -e '.hooks.UserPromptSubmit' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
-            doc_pass "UserPromptSubmit hook registered in settings"
-        else
-            doc_warn "UserPromptSubmit hook not registered in settings.json"
-        fi
+    if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq; then
+        local hook_events=("SessionStart" "UserPromptSubmit")
+        for event in "${hook_events[@]}"; do
+            if jq -e ".hooks.$event" "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
+                doc_pass "$event hook registered in settings"
+            else
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_settings_merge 2>/dev/null; then
+                        doc_fixed "$event hook registered in settings"
+                    else
+                        doc_fix_failed "$event hook — settings merge failed"
+                    fi
+                else
+                    doc_warn "$event hook not registered in settings.json"
+                fi
+            fi
+        done
     fi
     echo ""
 
@@ -179,16 +314,32 @@ phase_doctor() {
     echo -e "${BOLD}  Settings${NC}"
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
-    if [[ -f "$CLAUDE_SETTINGS" ]]; then
+    if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq; then
         if jq -e '.permissions.defaultMode == "plan"' "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
             doc_pass "Default mode: plan"
         else
-            doc_skip "Default mode: not set to plan"
+            if [[ "$doctor_fix" == "true" ]]; then
+                if fix_settings_merge 2>/dev/null; then
+                    doc_fixed "Default mode: plan"
+                else
+                    doc_fix_failed "Default mode — settings merge failed"
+                fi
+            else
+                doc_skip "Default mode: not set to plan"
+            fi
         fi
         if jq -e '.alwaysThinkingEnabled == true' "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
             doc_pass "Always-thinking: enabled"
         else
-            doc_skip "Always-thinking: not enabled"
+            if [[ "$doctor_fix" == "true" ]]; then
+                if fix_settings_merge 2>/dev/null; then
+                    doc_fixed "Always-thinking: enabled"
+                else
+                    doc_fix_failed "Always-thinking — settings merge failed"
+                fi
+            else
+                doc_skip "Always-thinking: not enabled"
+            fi
         fi
     fi
     echo ""
@@ -198,17 +349,36 @@ phase_doctor() {
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
     local git_ignore="$HOME/.config/git/ignore"
+    if [[ ! -f "$git_ignore" ]]; then
+        if [[ "$doctor_fix" == "true" ]]; then
+            if fix_gitignore_file; then
+                doc_fixed "~/.config/git/ignore created"
+            else
+                doc_fix_failed "~/.config/git/ignore — could not create"
+            fi
+        else
+            doc_fail "~/.config/git/ignore not found"
+        fi
+    fi
+
+    # Check entries (file may have just been created by fix above)
     if [[ -f "$git_ignore" ]]; then
         local required_entries=(".claude" "*.local.*" ".serena" ".xcodebuildmcp")
         for entry in "${required_entries[@]}"; do
             if grep -qxF "$entry" "$git_ignore" 2>/dev/null; then
                 doc_pass "$entry"
             else
-                doc_fail "$entry — missing from global gitignore"
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_gitignore_entry "$entry"; then
+                        doc_fixed "$entry"
+                    else
+                        doc_fix_failed "$entry — could not append to gitignore"
+                    fi
+                else
+                    doc_fail "$entry — missing from global gitignore"
+                fi
             fi
         done
-    else
-        doc_fail "~/.config/git/ignore not found"
     fi
     echo ""
 
@@ -240,7 +410,6 @@ phase_doctor() {
         local -a manifest_files=(
             "commands/pr.md|$HOME/.claude/commands/pr.md"
         )
-        local outdated_count=0
 
         # Check plain-copy files via direct diff
         for entry in "${direct_files[@]}"; do
@@ -261,8 +430,15 @@ phase_doctor() {
             if diff -q "$src_file" "$installed_path" >/dev/null 2>&1; then
                 doc_pass "$short_name"
             else
-                doc_fail "$short_name — outdated (source differs from installed)"
-                outdated_count=$((outdated_count + 1))
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_outdated_direct "$rel_path" "$installed_path" 2>/dev/null; then
+                        doc_fixed "$short_name"
+                    else
+                        doc_fix_failed "$short_name — could not update from source"
+                    fi
+                else
+                    doc_fail "$short_name — outdated (source differs from installed)"
+                fi
             fi
         done
 
@@ -291,8 +467,8 @@ phase_doctor() {
                 if [[ -z "$stored_hash" ]]; then
                     doc_warn "$short_name — not tracked (re-run setup to track)"
                 elif [[ "$stored_hash" != "$current_src_hash" ]]; then
-                    doc_fail "$short_name — outdated (source updated since install)"
-                    outdated_count=$((outdated_count + 1))
+                    # sed-modified files can't be auto-fixed (need user input for substitution)
+                    doc_fail "$short_name — outdated (source updated since install). Re-run setup to update."
                 else
                     doc_pass "$short_name"
                 fi
@@ -300,11 +476,6 @@ phase_doctor() {
                 doc_warn "$short_name — no manifest (re-run setup to track)"
             fi
         done
-
-        if [[ $outdated_count -gt 0 ]]; then
-            echo ""
-            echo -e "  ${YELLOW}Run ${BOLD}${src_dir}/setup.sh${NC}${YELLOW} to update outdated files.${NC}"
-        fi
     fi
     echo ""
 
