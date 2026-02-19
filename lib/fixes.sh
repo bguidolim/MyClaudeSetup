@@ -223,7 +223,10 @@ WRAPPER_EOF
         # Check if PATH already contains our bin dir
         # Use literal $HOME since rc files contain it unexpanded
         if ! grep -qF '$HOME/.claude/bin' "$shell_rc" 2>/dev/null; then
-            echo "" >> "$shell_rc"
+            # Only append a blank separator line if the file already has content
+            if [[ -s "$shell_rc" ]]; then
+                echo "" >> "$shell_rc"
+            fi
             echo "# Added by Claude Code iOS Setup" >> "$shell_rc"
             echo "export PATH=\"\$HOME/.claude/bin:\$PATH\"" >> "$shell_rc"
         fi

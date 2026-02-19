@@ -30,7 +30,11 @@ INSTALL_DIR="$HOME/.claude-ios-setup"
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Updating existing installation..."
-    git -C "$INSTALL_DIR" pull origin main || warn "Pull failed. Continuing with existing version."
+    if ! git -C "$INSTALL_DIR" pull --ff-only origin main 2>&1; then
+        warn "Pull failed (shallow clone may have diverged). Re-cloning..."
+        mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%Y%m%d_%H%M%S)"
+        git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    fi
 else
     if [[ -d "$INSTALL_DIR" ]]; then
         # Directory exists but isn't a git repo — move it aside
