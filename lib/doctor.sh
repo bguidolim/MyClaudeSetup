@@ -199,16 +199,21 @@ phase_doctor() {
     if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq; then
         # Read expected plugins from template
         if [[ -f "$template_settings" ]]; then
-            local plugin
-            while IFS= read -r plugin; do
-                [[ -z "$plugin" ]] && continue
-                local short_name="${plugin%%@*}"
-                if jq -e ".enabledPlugins.\"$plugin\"" "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
-                    doc_pass "$short_name"
-                else
-                    doc_skip "$short_name — not enabled"
-                fi
-            done < <(jq -r '.enabledPlugins | keys[]' "$template_settings" 2>/dev/null)
+            local template_plugins
+            if ! template_plugins=$(jq -r '.enabledPlugins | keys[]' "$template_settings" 2>/dev/null) || [[ -z "$template_plugins" ]]; then
+                doc_warn "Could not read plugins from template (config/settings.json)"
+            else
+                local plugin
+                while IFS= read -r plugin; do
+                    [[ -z "$plugin" ]] && continue
+                    local short_name="${plugin%%@*}"
+                    if jq -e ".enabledPlugins.\"$plugin\"" "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
+                        doc_pass "$short_name"
+                    else
+                        doc_skip "$short_name — not enabled"
+                    fi
+                done <<< "$template_plugins"
+            fi
         fi
 
         # Check for deprecated plugins (redundant or removed)
@@ -356,9 +361,13 @@ phase_doctor() {
             local label="${entry##*|}"
             local expected actual
             expected=$(jq -r "$jq_path // empty" "$template_settings" 2>/dev/null)
+            if [[ -z "$expected" ]]; then
+                doc_warn "$label — could not read expected value from template"
+                continue
+            fi
             actual=$(jq -r "$jq_path // empty" "$CLAUDE_SETTINGS" 2>/dev/null)
 
-            if [[ -n "$expected" && "$expected" == "$actual" ]]; then
+            if [[ "$expected" == "$actual" ]]; then
                 doc_pass "$label: $expected"
             else
                 if [[ "$doctor_fix" == "true" ]]; then

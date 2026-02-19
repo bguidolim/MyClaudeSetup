@@ -79,7 +79,8 @@ fix_settings_merge() {
               )}
             )
           )}
-        ' "$CLAUDE_SETTINGS" "$SCRIPT_DIR/config/settings.json" 2>&1); then
+        ' "$CLAUDE_SETTINGS" "$SCRIPT_DIR/config/settings.json" 2>/dev/null); then
+            [[ -n "$merged" ]] || return 1
             echo "$merged" > "$CLAUDE_SETTINGS"
         else
             return 1
@@ -119,10 +120,11 @@ fix_settings_auto_memory() {
     check_command jq || return 1
     [[ -f "$CLAUDE_SETTINGS" ]] || return 1
     local tmp_settings
-    if ! tmp_settings=$(jq '.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"' "$CLAUDE_SETTINGS" 2>&1); then
+    if ! tmp_settings=$(jq '.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"' "$CLAUDE_SETTINGS" 2>/dev/null); then
         return 1
     fi
     [[ -n "$tmp_settings" ]] || return 1
+    backup_file "$CLAUDE_SETTINGS"
     echo "$tmp_settings" > "$CLAUDE_SETTINGS"
 }
 
@@ -132,7 +134,7 @@ fix_plugin_remove_deprecated() {
     check_command jq || return 1
     [[ -f "$CLAUDE_SETTINGS" ]] || return 1
     local tmp_settings
-    if ! tmp_settings=$(jq "del(.enabledPlugins.\"$full_name\")" "$CLAUDE_SETTINGS" 2>&1); then
+    if ! tmp_settings=$(jq "del(.enabledPlugins.\"$full_name\")" "$CLAUDE_SETTINGS" 2>/dev/null); then
         return 1
     fi
     [[ -n "$tmp_settings" ]] || return 1
