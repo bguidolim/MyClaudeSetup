@@ -524,6 +524,85 @@ phase_doctor() {
     fi
     echo ""
 
+    # ===== CLI Wrapper =====
+    echo -e "${BOLD}  CLI Wrapper${NC} ${DIM}(claude-ios-setup command)${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────────${NC}"
+
+    # Detect what needs fixing before calling fix_cli_wrapper (which
+    # handles wrapper + PATH together), so we call it at most once.
+    local cli_wrapper_ok=false
+    local cli_repo_ok=false
+    local cli_path_ok=false
+    local wrapper_repo_dir=""
+    local shell_rc
+    shell_rc=$(resolve_shell_rc)
+
+    [[ -f "$CLI_WRAPPER_PATH" ]] && [[ -x "$CLI_WRAPPER_PATH" ]] && cli_wrapper_ok=true
+    if [[ "$cli_wrapper_ok" == true ]]; then
+        wrapper_repo_dir=$(grep '^REPO_DIR=' "$CLI_WRAPPER_PATH" 2>/dev/null | head -1 | cut -d'"' -f2)
+        [[ -n "$wrapper_repo_dir" && -d "$wrapper_repo_dir" ]] && cli_repo_ok=true
+    fi
+    [[ -n "$shell_rc" ]] && grep -qF '$HOME/.claude/bin' "$shell_rc" 2>/dev/null && cli_path_ok=true
+
+    # Save pre-fix state for reporting (distinguishes "already ok" from "just fixed")
+    local wrapper_was_ok=$cli_wrapper_ok
+    local repo_was_ok=$cli_repo_ok
+    local path_was_ok=$cli_path_ok
+
+    # Run fix once if anything is wrong
+    local cli_fix_ok=false
+    if [[ "$doctor_fix" == "true" ]] && \
+       [[ "$cli_wrapper_ok" == false || "$cli_repo_ok" == false || "$cli_path_ok" == false ]]; then
+        if fix_cli_wrapper; then
+            cli_fix_ok=true
+            # Re-check state after fix for accurate reporting
+            [[ -f "$CLI_WRAPPER_PATH" ]] && [[ -x "$CLI_WRAPPER_PATH" ]] && cli_wrapper_ok=true
+            if [[ "$cli_wrapper_ok" == true ]]; then
+                wrapper_repo_dir=$(grep '^REPO_DIR=' "$CLI_WRAPPER_PATH" 2>/dev/null | head -1 | cut -d'"' -f2)
+                [[ -n "$wrapper_repo_dir" && -d "$wrapper_repo_dir" ]] && cli_repo_ok=true
+            fi
+            [[ -n "$shell_rc" ]] && grep -qF '$HOME/.claude/bin' "$shell_rc" 2>/dev/null && cli_path_ok=true
+        fi
+    fi
+
+    # --- Report: wrapper ---
+    if [[ "$wrapper_was_ok" == true ]]; then
+        doc_pass "CLI wrapper installed"
+    elif [[ "$cli_wrapper_ok" == true ]]; then
+        doc_fixed "CLI wrapper installed"
+    elif [[ "$doctor_fix" == "true" ]]; then
+        doc_fix_failed "CLI wrapper — could not install"
+    else
+        doc_fail "CLI wrapper — not installed. Run setup to install."
+    fi
+
+    # --- Report: repo dir ---
+    if [[ "$cli_wrapper_ok" == true ]]; then
+        if [[ "$repo_was_ok" == true ]]; then
+            doc_pass "Repo directory exists ($wrapper_repo_dir)"
+        elif [[ "$cli_repo_ok" == true ]]; then
+            doc_fixed "Repo directory exists ($wrapper_repo_dir)"
+        elif [[ -n "$wrapper_repo_dir" ]]; then
+            doc_fail "CLI wrapper — repo dir missing: $wrapper_repo_dir"
+        fi
+    fi
+
+    # --- Report: PATH ---
+    if [[ -n "$shell_rc" ]]; then
+        if [[ "$path_was_ok" == true ]]; then
+            doc_pass "PATH configured in $(basename "$shell_rc")"
+        elif [[ "$cli_path_ok" == true ]]; then
+            doc_fixed "PATH configured in $(basename "$shell_rc")"
+        elif [[ "$doctor_fix" == "true" ]]; then
+            doc_fix_failed "PATH — could not update $(basename "$shell_rc")"
+        else
+            doc_fail "PATH — ~/.claude/bin not in $(basename "$shell_rc")"
+        fi
+    else
+        doc_warn "Unsupported shell ($(basename "${SHELL:-unknown}")) — add ~/.claude/bin to PATH manually"
+    fi
+    echo ""
+
     # ===== Project (current directory) =====
     local has_project=false
     local project_dir="$PWD"
@@ -652,9 +731,9 @@ phase_doctor() {
         echo -e "  ${YELLOW}No critical issues, but some warnings to review.${NC}"
     else
         if [[ "$doctor_fix" != "true" ]]; then
-            echo -e "  ${RED}Some issues found. Run ${BOLD}./setup.sh doctor --fix${NC}${RED} to auto-fix.${NC}"
+            echo -e "  ${RED}Some issues found. Run ${BOLD}claude-ios-setup doctor --fix${NC}${RED} to auto-fix.${NC}"
         else
-            echo -e "  ${RED}Some issues could not be auto-fixed. Run ${BOLD}./setup.sh${NC}${RED} to resolve.${NC}"
+            echo -e "  ${RED}Some issues could not be auto-fixed. Run ${BOLD}claude-ios-setup${NC}${RED} to resolve.${NC}"
         fi
     fi
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

@@ -428,6 +428,7 @@ phase_install() {
     [[ $INSTALL_CMD_PR -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_HOOKS -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_SETTINGS -eq 1 ]] && total_steps=$((total_steps + 1))
+    total_steps=$((total_steps + 1))  # CLI wrapper (always installed)
     header "🚀 Installing..."
 
     # --- Homebrew ---
@@ -735,6 +736,39 @@ phase_install() {
         success "Global gitignore updated (${#added_entries[@]} entries added)"
     fi
 
+    # --- CLI Wrapper ---
+    current_step=$((current_step + 1))
+    step $current_step $total_steps "Installing CLI wrapper"
+
+    local cli_hash_before=""
+    [[ -f "$CLI_WRAPPER_PATH" ]] && cli_hash_before=$(file_hash "$CLI_WRAPPER_PATH")
+
+    fix_cli_wrapper
+
+    local cli_hash_after=""
+    [[ -f "$CLI_WRAPPER_PATH" ]] && cli_hash_after=$(file_hash "$CLI_WRAPPER_PATH")
+
+    if [[ "$cli_hash_before" != "$cli_hash_after" ]]; then
+        INSTALLED_ITEMS+=("CLI: claude-ios-setup")
+        if [[ -z "$cli_hash_before" ]]; then
+            success "CLI wrapper installed to $CLI_WRAPPER_PATH"
+        else
+            success "CLI wrapper updated"
+        fi
+        if [[ ":$PATH:" != *":$CLI_WRAPPER_DIR:"* ]]; then
+            info "Restart your terminal or run: export PATH=\"\$HOME/.claude/bin:\$PATH\""
+        fi
+    else
+        SKIPPED_ITEMS+=("CLI wrapper (already up to date)")
+    fi
+
+    # Warn if PATH could not be configured (unsupported shell)
+    local shell_rc
+    shell_rc=$(resolve_shell_rc)
+    if [[ -z "$shell_rc" ]]; then
+        warn "Unsupported shell ($(basename "${SHELL:-unknown}")) — add ~/.claude/bin to your PATH manually"
+    fi
+
 }
 
 # ---------------------------------------------------------------------------
@@ -790,8 +824,8 @@ phase_summary_post() {
         done
     else
         echo ""
-        echo -e "       ${DIM}You can configure projects later by re-running:${NC}"
-        echo -e "       ${SCRIPT_DIR}/setup.sh configure-project"
+        echo -e "       ${DIM}You can configure projects later by running:${NC}"
+        echo -e "       claude-ios-setup configure-project"
     fi
     echo ""
 

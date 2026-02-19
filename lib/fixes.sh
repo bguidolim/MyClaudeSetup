@@ -157,6 +157,85 @@ fix_outdated_direct() {
     manifest_record "$rel_path"
 }
 
+# Install CLI wrapper to ~/.claude/bin/ and add to PATH
+fix_cli_wrapper() {
+    local repo_dir="$SCRIPT_DIR"
+
+    mkdir -p "$CLI_WRAPPER_DIR"
+
+    # Generate wrapper script with repo location baked in (unlike other
+    # fix_* functions, this doesn't copy from a template file)
+    local wrapper_content
+    wrapper_content=$(cat <<'WRAPPER_EOF'
+#!/bin/bash
+set -euo pipefail
+
+REPO_DIR="__REPO_DIR__"
+REPO_URL="__REPO_URL__"
+DEFAULT_DIR="__DEFAULT_DIR__"
+
+# If repo moved/deleted, re-clone to default location and update this wrapper
+if [[ ! -d "$REPO_DIR" ]]; then
+    echo -e "\033[1;33m[WARN]\033[0m Setup repo not found at $REPO_DIR"
+    echo -e "\033[0;34m[INFO]\033[0m Re-cloning to $DEFAULT_DIR..."
+    if ! git clone --depth 1 "$REPO_URL" "$DEFAULT_DIR"; then
+        echo -e "\033[0;31m[ERROR]\033[0m Failed to clone. Check your network connection."
+        exit 1
+    fi
+    REPO_DIR="$DEFAULT_DIR"
+    # Update this wrapper to point to new location (non-fatal: clone already succeeded)
+    # Resolve own path via BASH_SOURCE (reliable even when invoked via PATH)
+    WRAPPER_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+    sed -i '' "s|^REPO_DIR=.*|REPO_DIR=\"$DEFAULT_DIR\"|" "$WRAPPER_SELF" 2>/dev/null || \
+        echo -e "\033[1;33m[WARN]\033[0m Could not update wrapper. Next run will re-clone."
+fi
+
+# Check for staleness (warn if last fetch was >7 days ago)
+# Note: stat -f %m is macOS-specific; this tool only targets macOS
+local_fetch_head="$REPO_DIR/.git/FETCH_HEAD"
+if [[ -f "$local_fetch_head" ]]; then
+    local_fetch_age=$(( $(date +%s) - $(stat -f %m "$local_fetch_head") ))
+    if [[ $local_fetch_age -gt 604800 ]]; then
+        local_days=$(( local_fetch_age / 86400 ))
+        echo -e "\033[1;33m[WARN]\033[0m Last updated ${local_days} days ago. Run 'claude-ios-setup update' to get the latest."
+    fi
+fi
+
+exec "$REPO_DIR/setup.sh" "$@"
+WRAPPER_EOF
+)
+
+    # Substitute placeholders
+    wrapper_content="${wrapper_content//__REPO_DIR__/$repo_dir}"
+    wrapper_content="${wrapper_content//__REPO_URL__/$REPO_URL}"
+    wrapper_content="${wrapper_content//__DEFAULT_DIR__/$DEFAULT_INSTALL_DIR}"
+
+    # Write wrapper only if content changed
+    if [[ ! -f "$CLI_WRAPPER_PATH" ]] || [[ "$(cat "$CLI_WRAPPER_PATH")" != "$wrapper_content" ]]; then
+        printf '%s\n' "$wrapper_content" > "$CLI_WRAPPER_PATH"
+    fi
+    chmod +x "$CLI_WRAPPER_PATH"
+
+    # Add to PATH in shell rc file
+    local shell_rc
+    shell_rc=$(resolve_shell_rc)
+
+    if [[ -n "$shell_rc" ]]; then
+        # Check if PATH already contains our bin dir
+        # Use literal $HOME since rc files contain it unexpanded
+        if ! grep -qF '$HOME/.claude/bin' "$shell_rc" 2>/dev/null; then
+            # Only append a blank separator line if the file already has content
+            if [[ -s "$shell_rc" ]]; then
+                echo "" >> "$shell_rc"
+            fi
+            echo "# Added by Claude Code iOS Setup" >> "$shell_rc"
+            echo "export PATH=\"\$HOME/.claude/bin:\$PATH\"" >> "$shell_rc"
+        fi
+    fi
+
+    return 0
+}
+
 # === Tier 2: Needs brew/network ===
 
 # Install a Homebrew package

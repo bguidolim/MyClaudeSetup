@@ -12,6 +12,7 @@
 #        ./setup.sh doctor [--fix]        # Diagnose installation health
 #        ./setup.sh configure-project     # Configure CLAUDE.local.md for a project
 #        ./setup.sh cleanup               # Find and delete backup files
+#        ./setup.sh update                # Pull latest from remote
 # =============================================================================
 
 set -euo pipefail
@@ -28,6 +29,10 @@ CLAUDE_SETTINGS="$CLAUDE_DIR/settings.json"
 CLAUDE_HOOKS_DIR="$CLAUDE_DIR/hooks"
 CLAUDE_SKILLS_DIR="$CLAUDE_DIR/skills"
 SETUP_MANIFEST="$CLAUDE_DIR/.setup-manifest"
+CLI_WRAPPER_DIR="$CLAUDE_DIR/bin"
+CLI_WRAPPER_PATH="$CLAUDE_DIR/bin/claude-ios-setup"
+DEFAULT_INSTALL_DIR="$HOME/.claude-ios-setup"
+REPO_URL="https://github.com/bguidolim/my-claude-ios-setup.git"
 
 # Colors
 RED='\033[0;31m'
@@ -133,6 +138,40 @@ while [[ $# -gt 0 ]]; do
             phase_cleanup
             exit 0
             ;;
+        update|--update)
+            info "Checking for updates..."
+            # Refuse to update if there are local modifications
+            if ! git -C "$SCRIPT_DIR" diff --quiet 2>/dev/null || \
+               ! git -C "$SCRIPT_DIR" diff --cached --quiet 2>/dev/null; then
+                error "Local changes detected in $SCRIPT_DIR. Stash or commit them first."
+                exit 1
+            fi
+            # Determine which branch to pull.
+            # The default install dir always tracks main; a custom clone
+            # location may be on a different branch (e.g. a developer fork).
+            local_branch=""
+            if [[ "$SCRIPT_DIR" != "$DEFAULT_INSTALL_DIR" ]]; then
+                local_branch=$(git -C "$SCRIPT_DIR" branch --show-current 2>/dev/null || echo "")
+            fi
+            # Non-default install on a feature branch: try pulling that branch first
+            if [[ -n "$local_branch" && "$local_branch" != "main" ]]; then
+                info "Updating branch: $local_branch"
+                if ! git -C "$SCRIPT_DIR" pull origin "$local_branch" 2>&1; then
+                    warn "Could not update branch '$local_branch'. Falling back to main."
+                    local_branch=""
+                fi
+            fi
+            # Default path: update main
+            if [[ -z "$local_branch" || "$local_branch" == "main" ]]; then
+                git -C "$SCRIPT_DIR" checkout main >/dev/null 2>&1 || {
+                    error "Could not switch to main branch."
+                    exit 1
+                }
+                git -C "$SCRIPT_DIR" pull origin main
+            fi
+            success "Updated successfully"
+            exit 0
+            ;;
         --help|-h)
             echo "Usage: ./setup.sh                      # Interactive setup (pick components)"
             echo "       ./setup.sh --all                 # Install everything (minimal prompts)"
@@ -141,6 +180,7 @@ while [[ $# -gt 0 ]]; do
             echo "       ./setup.sh doctor [--fix]        # Diagnose installation health"
             echo "       ./setup.sh configure-project     # Configure CLAUDE.local.md for a project"
             echo "       ./setup.sh cleanup               # Find and delete backup files"
+            echo "       ./setup.sh update                # Pull latest from remote"
             exit 0
             ;;
         *)
