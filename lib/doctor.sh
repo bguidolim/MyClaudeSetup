@@ -155,15 +155,17 @@ phase_doctor() {
             fi
         done
 
-        # Check for deprecated MCP servers
+        # Check for deprecated MCP servers — add entries to remove them
         local deprecated_servers=("mcp-omnisearch")
         for server in "${deprecated_servers[@]}"; do
             if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
                 if [[ "$doctor_fix" == "true" ]]; then
-                    if fix_mcp_remove_deprecated "$server" >/dev/null 2>&1; then
+                    local fix_output
+                    if fix_output=$(fix_mcp_remove_deprecated "$server" 2>&1); then
                         doc_fixed "$server removed (deprecated)"
                     else
-                        doc_fix_failed "$server — could not remove (deprecated server)"
+                        doc_fix_failed "$server — claude mcp remove failed"
+                        [[ -n "$fix_output" ]] && echo -e "    ${DIM}${fix_output}${NC}" | head -3
                     fi
                 else
                     doc_warn "$server is deprecated — run doctor --fix to remove it"
@@ -218,10 +220,12 @@ phase_doctor() {
             local short_name="${plugin%%@*}"
             if jq -e ".enabledPlugins.\"$plugin\"" "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
                 if [[ "$doctor_fix" == "true" ]]; then
-                    if fix_plugin_remove_deprecated "$plugin" 2>/dev/null; then
+                    local fix_output
+                    if fix_output=$(fix_plugin_remove_deprecated "$plugin" 2>&1); then
                         doc_fixed "$short_name removed ($reason)"
                     else
-                        doc_fix_failed "$short_name — could not remove"
+                        doc_fix_failed "$short_name — jq settings edit failed"
+                        [[ -n "$fix_output" ]] && echo -e "    ${DIM}${fix_output}${NC}" | head -3
                     fi
                 else
                     doc_warn "$short_name is $reason — run doctor --fix to remove"
@@ -437,6 +441,7 @@ phase_doctor() {
             "skills/continuous-learning/references/templates.md|$CLAUDE_SKILLS_DIR/continuous-learning/references/templates.md|continuous-learning templates"
         )
         # sed-modified files: need manifest hash (can't compare directly)
+        # Format: rel_path|installed_path
         local -a manifest_files=(
             "commands/pr.md|$HOME/.claude/commands/pr.md"
         )

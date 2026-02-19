@@ -108,7 +108,7 @@ mcp__sosumi__searchAppleDocumentation(query: "<topic>")
 
 **For general topics** — use Claude Code's built-in web search:
 ```
-WebSearch(query: "<topic> best practices 2026")
+WebSearch(query: "<topic> best practices <current year>")
 ```
 
 **Skip research for:** project-specific conventions, personal preferences, time-sensitive captures.
