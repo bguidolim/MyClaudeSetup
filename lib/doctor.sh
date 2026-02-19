@@ -156,17 +156,20 @@ phase_doctor() {
         done
 
         # Check for deprecated MCP servers
-        if jq -e '.mcpServers."mcp-omnisearch"' "$CLAUDE_JSON" >/dev/null 2>&1; then
-            if [[ "$doctor_fix" == "true" ]]; then
-                if fix_mcp_remove_deprecated "mcp-omnisearch" >/dev/null 2>&1; then
-                    doc_fixed "mcp-omnisearch removed (deprecated)"
+        local deprecated_servers=("mcp-omnisearch")
+        for server in "${deprecated_servers[@]}"; do
+            if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_mcp_remove_deprecated "$server" >/dev/null 2>&1; then
+                        doc_fixed "$server removed (deprecated)"
+                    else
+                        doc_fix_failed "$server — could not remove (deprecated server)"
+                    fi
                 else
-                    doc_fix_failed "mcp-omnisearch — could not remove (deprecated server)"
+                    doc_warn "$server is deprecated — run doctor --fix to remove it"
                 fi
-            else
-                doc_warn "mcp-omnisearch is deprecated — run doctor --fix to remove it"
             fi
-        fi
+        done
     fi
     echo ""
 
@@ -535,7 +538,6 @@ phase_doctor() {
         local xbm_template="$SCRIPT_DIR/templates/xcodebuildmcp.yaml"
         if [[ -f "$xbm_project_config" ]]; then
             doc_pass ".xcodebuildmcp/config.yaml"
-
             # Compare workflows against template
             if [[ -f "$xbm_template" ]]; then
                 local template_workflows config_workflows

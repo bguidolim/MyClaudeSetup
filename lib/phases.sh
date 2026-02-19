@@ -600,7 +600,6 @@ phase_install() {
                     success "docs-mcp-server configured"
                 fi
             fi
-
         fi
     fi
 
