@@ -146,7 +146,7 @@ phase_doctor() {
     elif ! check_command jq; then
         doc_warn "jq not installed — cannot inspect ~/.claude.json"
     else
-        local mcp_servers=("XcodeBuildMCP" "sosumi" "serena" "docs-mcp-server" "mcp-omnisearch")
+        local mcp_servers=("XcodeBuildMCP" "sosumi" "serena" "docs-mcp-server")
         for server in "${mcp_servers[@]}"; do
             if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
                 doc_pass "$server"
@@ -155,14 +155,23 @@ phase_doctor() {
             fi
         done
 
-        # Check Perplexity API key
-        local perp_key
-        perp_key=$(jq -r '.mcpServers."mcp-omnisearch".env.PERPLEXITY_API_KEY // ""' "$CLAUDE_JSON" 2>/dev/null) || perp_key=""
-        if [[ "$perp_key" == "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
-            doc_warn "mcp-omnisearch: Perplexity API key is still a placeholder"
-        elif [[ -z "$perp_key" ]] && jq -e '.mcpServers."mcp-omnisearch"' "$CLAUDE_JSON" >/dev/null 2>&1; then
-            doc_warn "mcp-omnisearch: Perplexity API key is empty"
-        fi
+        # Check for deprecated MCP servers — add entries to remove them
+        local deprecated_servers=("mcp-omnisearch")
+        for server in "${deprecated_servers[@]}"; do
+            if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
+                if [[ "$doctor_fix" == "true" ]]; then
+                    local fix_output
+                    if fix_output=$(fix_mcp_remove_deprecated "$server" 2>&1); then
+                        doc_fixed "$server removed (deprecated)"
+                    else
+                        doc_fix_failed "$server — claude mcp remove failed"
+                        [[ -n "$fix_output" ]] && echo -e "    ${DIM}${fix_output}${NC}" | head -3
+                    fi
+                else
+                    doc_warn "$server is deprecated — run doctor --fix to remove it"
+                fi
+            fi
+        done
     fi
     echo ""
 
@@ -185,21 +194,47 @@ phase_doctor() {
     fi
 
     # Only check plugins if settings file exists now
+    local template_settings="$SCRIPT_DIR/config/settings.json"
+
     if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq; then
-        local plugins=(
-            "explanatory-output-style@claude-plugins-official"
-            "pr-review-toolkit@claude-plugins-official"
-            "code-simplifier@claude-plugins-official"
-            "ralph-loop@claude-plugins-official"
-            "claude-hud@claude-hud"
-            "claude-md-management@claude-plugins-official"
-        )
-        for plugin in "${plugins[@]}"; do
+        # Read expected plugins from template
+        if [[ -f "$template_settings" ]]; then
+            local template_plugins
+            if ! template_plugins=$(jq -r '.enabledPlugins | keys[]' "$template_settings" 2>/dev/null) || [[ -z "$template_plugins" ]]; then
+                doc_warn "Could not read plugins from template (config/settings.json)"
+            else
+                local plugin
+                while IFS= read -r plugin; do
+                    [[ -z "$plugin" ]] && continue
+                    local short_name="${plugin%%@*}"
+                    if jq -e ".enabledPlugins.\"$plugin\"" "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
+                        doc_pass "$short_name"
+                    else
+                        doc_skip "$short_name — not enabled"
+                    fi
+                done <<< "$template_plugins"
+            fi
+        fi
+
+        # Check for deprecated plugins (redundant or removed)
+        # Format: full_name|reason
+        local deprecated_plugins=("code-simplifier@claude-plugins-official|redundant (included in pr-review-toolkit)")
+        for entry in "${deprecated_plugins[@]}"; do
+            local plugin="${entry%%|*}"
+            local reason="${entry##*|}"
             local short_name="${plugin%%@*}"
             if jq -e ".enabledPlugins.\"$plugin\"" "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
-                doc_pass "$short_name"
-            else
-                doc_skip "$short_name — not enabled"
+                if [[ "$doctor_fix" == "true" ]]; then
+                    local fix_output
+                    if fix_output=$(fix_plugin_remove_deprecated "$plugin" 2>&1); then
+                        doc_fixed "$short_name removed ($reason)"
+                    else
+                        doc_fix_failed "$short_name — jq settings edit failed"
+                        [[ -n "$fix_output" ]] && echo -e "    ${DIM}${fix_output}${NC}" | head -3
+                    fi
+                else
+                    doc_warn "$short_name is $reason — run doctor --fix to remove"
+                fi
             fi
         done
     fi
@@ -314,33 +349,38 @@ phase_doctor() {
     echo -e "${BOLD}  Settings${NC}"
     echo -e "  ${DIM}──────────────────────────────────────────${NC}"
 
-    if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq; then
-        if jq -e '.permissions.defaultMode == "plan"' "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
-            doc_pass "Default mode: plan"
-        else
-            if [[ "$doctor_fix" == "true" ]]; then
-                if fix_settings_merge 2>/dev/null; then
-                    doc_fixed "Default mode: plan"
-                else
-                    doc_fix_failed "Default mode — settings merge failed"
-                fi
-            else
-                doc_skip "Default mode: not set to plan"
+    if [[ -f "$CLAUDE_SETTINGS" ]] && check_command jq && [[ -f "$template_settings" ]]; then
+        # Read expected settings from template
+        # Format: jq_path|label
+        local -a settings_checks=(
+            ".permissions.defaultMode|Default mode"
+            ".alwaysThinkingEnabled|Always-thinking"
+        )
+        for entry in "${settings_checks[@]}"; do
+            local jq_path="${entry%%|*}"
+            local label="${entry##*|}"
+            local expected actual
+            expected=$(jq -r "$jq_path // empty" "$template_settings" 2>/dev/null)
+            if [[ -z "$expected" ]]; then
+                doc_warn "$label — could not read expected value from template"
+                continue
             fi
-        fi
-        if jq -e '.alwaysThinkingEnabled == true' "$CLAUDE_SETTINGS" 2>/dev/null | grep -q "true"; then
-            doc_pass "Always-thinking: enabled"
-        else
-            if [[ "$doctor_fix" == "true" ]]; then
-                if fix_settings_merge 2>/dev/null; then
-                    doc_fixed "Always-thinking: enabled"
-                else
-                    doc_fix_failed "Always-thinking — settings merge failed"
-                fi
+            actual=$(jq -r "$jq_path // empty" "$CLAUDE_SETTINGS" 2>/dev/null)
+
+            if [[ "$expected" == "$actual" ]]; then
+                doc_pass "$label: $expected"
             else
-                doc_skip "Always-thinking: not enabled"
+                if [[ "$doctor_fix" == "true" ]]; then
+                    if fix_settings_merge 2>/dev/null; then
+                        doc_fixed "$label: $expected"
+                    else
+                        doc_fix_failed "$label — settings merge failed"
+                    fi
+                else
+                    doc_skip "$label: ${actual:-not set} (expected: $expected)"
+                fi
             fi
-        fi
+        done
     fi
     echo ""
 
@@ -403,13 +443,15 @@ phase_doctor() {
         doc_warn "Source repo not found"
     else
         # Plain-copy files: can compare source vs installed directly
+        # Format: rel_path|installed_path|display_name
         local -a direct_files=(
-            "hooks/session_start.sh|$CLAUDE_HOOKS_DIR/session_start.sh"
-            "hooks/continuous-learning-activator.sh|$CLAUDE_HOOKS_DIR/continuous-learning-activator.sh"
-            "skills/continuous-learning/SKILL.md|$CLAUDE_SKILLS_DIR/continuous-learning/SKILL.md"
-            "skills/continuous-learning/references/templates.md|$CLAUDE_SKILLS_DIR/continuous-learning/references/templates.md"
+            "hooks/session_start.sh|$CLAUDE_HOOKS_DIR/session_start.sh|session_start.sh"
+            "hooks/continuous-learning-activator.sh|$CLAUDE_HOOKS_DIR/continuous-learning-activator.sh|continuous-learning-activator.sh"
+            "skills/continuous-learning/SKILL.md|$CLAUDE_SKILLS_DIR/continuous-learning/SKILL.md|continuous-learning skill"
+            "skills/continuous-learning/references/templates.md|$CLAUDE_SKILLS_DIR/continuous-learning/references/templates.md|continuous-learning templates"
         )
         # sed-modified files: need manifest hash (can't compare directly)
+        # Format: rel_path|installed_path
         local -a manifest_files=(
             "commands/pr.md|$HOME/.claude/commands/pr.md"
         )
@@ -417,9 +459,9 @@ phase_doctor() {
         # Check plain-copy files via direct diff
         for entry in "${direct_files[@]}"; do
             local rel_path="${entry%%|*}"
-            local installed_path="${entry##*|}"
-            local short_name
-            short_name=$(basename "$rel_path")
+            local remainder="${entry#*|}"
+            local installed_path="${remainder%%|*}"
+            local short_name="${remainder##*|}"
             local src_file="$src_dir/$rel_path"
 
             if [[ ! -f "$installed_path" ]]; then
@@ -530,13 +572,6 @@ phase_doctor() {
         local xbm_template="$SCRIPT_DIR/templates/xcodebuildmcp.yaml"
         if [[ -f "$xbm_project_config" ]]; then
             doc_pass ".xcodebuildmcp/config.yaml"
-            # Check if xcode-ide workflow is enabled
-            if grep -q "xcode-ide" "$xbm_project_config" 2>/dev/null; then
-                doc_pass "xcode-ide workflow enabled"
-            else
-                doc_warn "xcode-ide workflow not enabled — xcode_tools_* unavailable"
-            fi
-
             # Compare workflows against template
             if [[ -f "$xbm_template" ]]; then
                 local template_workflows config_workflows

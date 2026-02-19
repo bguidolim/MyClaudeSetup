@@ -124,23 +124,6 @@ ensure_brew_in_path() {
     fi
 }
 
-# Read an env var from an existing MCP server in ~/.claude.json
-# Usage: get_mcp_env "server-name" "ENV_VAR_NAME"
-# Returns the value on stdout, or empty string if not found
-get_mcp_env() {
-    local server=$1
-    local var_name=$2
-    if [[ -f "$CLAUDE_JSON" ]]; then
-        if check_command jq; then
-            jq -r ".mcpServers.\"${server}\".env.\"${var_name}\" // empty" "$CLAUDE_JSON" 2>/dev/null || true
-        else
-            # Fallback: rough grep extraction (works for simple string values)
-            grep -o "\"${var_name}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$CLAUDE_JSON" 2>/dev/null \
-                | head -1 | sed 's/.*:.*"\(.*\)"/\1/' || true
-        fi
-    fi
-}
-
 # Run claude CLI without nesting check
 claude_cli() {
     CLAUDECODE="" claude "$@"

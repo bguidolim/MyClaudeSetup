@@ -79,7 +79,8 @@ fix_settings_merge() {
               )}
             )
           )}
-        ' "$CLAUDE_SETTINGS" "$SCRIPT_DIR/config/settings.json" 2>&1); then
+        ' "$CLAUDE_SETTINGS" "$SCRIPT_DIR/config/settings.json" 2>/dev/null); then
+            [[ -n "$merged" ]] || return 1
             echo "$merged" > "$CLAUDE_SETTINGS"
         else
             return 1
@@ -114,12 +115,30 @@ fix_cmd_pr() {
     manifest_record "commands/pr.md"
 }
 
-# Set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 in settings.json
+# Set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 in ~/.claude/settings.json
 fix_settings_auto_memory() {
     check_command jq || return 1
     [[ -f "$CLAUDE_SETTINGS" ]] || return 1
     local tmp_settings
-    tmp_settings=$(jq '.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"' "$CLAUDE_SETTINGS")
+    if ! tmp_settings=$(jq '.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"' "$CLAUDE_SETTINGS" 2>/dev/null); then
+        return 1
+    fi
+    [[ -n "$tmp_settings" ]] || return 1
+    backup_file "$CLAUDE_SETTINGS"
+    echo "$tmp_settings" > "$CLAUDE_SETTINGS"
+}
+
+# Remove a deprecated plugin from ~/.claude/settings.json
+fix_plugin_remove_deprecated() {
+    local full_name=$1
+    check_command jq || return 1
+    [[ -f "$CLAUDE_SETTINGS" ]] || return 1
+    local tmp_settings
+    if ! tmp_settings=$(jq "del(.enabledPlugins.\"$full_name\")" "$CLAUDE_SETTINGS" 2>/dev/null); then
+        return 1
+    fi
+    [[ -n "$tmp_settings" ]] || return 1
+    backup_file "$CLAUDE_SETTINGS"
     echo "$tmp_settings" > "$CLAUDE_SETTINGS"
 }
 
@@ -197,6 +216,14 @@ fix_plugin() {
 fix_skill_xcodebuild() {
     check_command npx || return 1
     npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y 2>&1
+}
+
+# Remove a deprecated MCP server from ~/.claude.json (user scope)
+fix_mcp_remove_deprecated() {
+    local name=$1
+    check_command claude || return 1
+    [[ -f "$CLAUDE_JSON" ]] && backup_file "$CLAUDE_JSON"
+    claude_cli mcp remove -s user "$name" 2>&1
 }
 
 # === Dependency-awareness helpers ===

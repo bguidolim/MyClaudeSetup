@@ -1,7 +1,8 @@
 {
   "env": {
     "ENABLE_TOOL_SEARCH": "1",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-4-6"
   },
   "permissions": {
     "defaultMode": "plan"
@@ -33,7 +34,6 @@
   "enabledPlugins": {
     "explanatory-output-style@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true,
     "ralph-loop@claude-plugins-official": true,
     "claude-hud@claude-hud": true,
     "claude-md-management@claude-plugins-official": true

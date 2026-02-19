@@ -54,10 +54,8 @@ phase_selection() {
         INSTALL_MCP_SOSUMI=1
         INSTALL_MCP_SERENA=1
         INSTALL_MCP_DOCS=1
-        INSTALL_MCP_OMNISEARCH=1
         INSTALL_PLUGIN_EXPLANATORY=1
         INSTALL_PLUGIN_PR_REVIEW=1
-        INSTALL_PLUGIN_SIMPLIFIER=1
         INSTALL_PLUGIN_RALPH=1
         INSTALL_PLUGIN_HUD=1
         INSTALL_PLUGIN_CLAUDE_MD=1
@@ -76,24 +74,6 @@ phase_selection() {
         if [[ -z "$BRANCH_PREFIX" ]]; then
             BRANCH_PREFIX='feature'
             info "Defaulting branch prefix to: ${BOLD}${BRANCH_PREFIX}${NC}"
-        fi
-
-        echo ""
-        local existing_pplx_key
-        existing_pplx_key=$(get_mcp_env "mcp-omnisearch" "PERPLEXITY_API_KEY")
-        if [[ -n "$existing_pplx_key" && "$existing_pplx_key" != "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
-            local masked_key="${existing_pplx_key:0:8}...${existing_pplx_key: -4}"
-            echo -ne "  Perplexity API key for mcp-omnisearch [current: ${masked_key}] (Enter to keep): "
-        else
-            echo -ne "  Perplexity API key for mcp-omnisearch (Enter to skip): "
-        fi
-        read -r PERPLEXITY_API_KEY
-        if [[ -z "$PERPLEXITY_API_KEY" ]]; then
-            if [[ -n "$existing_pplx_key" && "$existing_pplx_key" != "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
-                PERPLEXITY_API_KEY="$existing_pplx_key"
-            else
-                PERPLEXITY_API_KEY="__ADD_YOUR_PERPLEXITY_API_KEY__"
-            fi
         fi
 
         resolve_dependencies
@@ -145,29 +125,6 @@ phase_selection() {
     fi
     echo ""
 
-    echo -e "  ${BOLD}5. mcp-omnisearch${NC}"
-    echo -e "     AI-powered web search via Perplexity. Requires a Perplexity API key."
-    if ask_yn "Install mcp-omnisearch?"; then
-        INSTALL_MCP_OMNISEARCH=1
-        local existing_pplx_key
-        existing_pplx_key=$(get_mcp_env "mcp-omnisearch" "PERPLEXITY_API_KEY")
-        if [[ -n "$existing_pplx_key" && "$existing_pplx_key" != "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
-            local masked_key="${existing_pplx_key:0:8}...${existing_pplx_key: -4}"
-            echo -ne "     Perplexity API key [current: ${masked_key}] (Enter to keep): "
-        else
-            echo -ne "     Enter your Perplexity API key (or press Enter to add later): "
-        fi
-        read -r PERPLEXITY_API_KEY
-        if [[ -z "$PERPLEXITY_API_KEY" ]]; then
-            if [[ -n "$existing_pplx_key" && "$existing_pplx_key" != "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
-                PERPLEXITY_API_KEY="$existing_pplx_key"
-            else
-                warn "No API key provided. You can add it later in ~/.claude.json"
-                PERPLEXITY_API_KEY="__ADD_YOUR_PERPLEXITY_API_KEY__"
-            fi
-        fi
-    fi
-
     # === Category B: Plugins ===
     header "🧩 Plugins"
     echo -e "  ${DIM}Plugins extend Claude Code with specialized capabilities.${NC}"
@@ -187,28 +144,21 @@ phase_selection() {
     fi
     echo ""
 
-    echo -e "  ${BOLD}3. code-simplifier${NC}"
-    echo -e "     Simplifies and refines code for clarity, consistency, and maintainability."
-    if ask_yn "Install code-simplifier?"; then
-        INSTALL_PLUGIN_SIMPLIFIER=1
-    fi
-    echo ""
-
-    echo -e "  ${BOLD}4. ralph-loop${NC}"
+    echo -e "  ${BOLD}3. ralph-loop${NC}"
     echo -e "     Iterative refinement loop for complex multi-step tasks."
     if ask_yn "Install ralph-loop?"; then
         INSTALL_PLUGIN_RALPH=1
     fi
     echo ""
 
-    echo -e "  ${BOLD}5. claude-hud${NC}"
+    echo -e "  ${BOLD}4. claude-hud${NC}"
     echo -e "     Status line HUD showing real-time session info (cost, tokens, etc.)."
     if ask_yn "Install claude-hud?"; then
         INSTALL_PLUGIN_HUD=1
     fi
     echo ""
 
-    echo -e "  ${BOLD}6. claude-md-management${NC}"
+    echo -e "  ${BOLD}5. claude-md-management${NC}"
     echo -e "     Audit and improve CLAUDE.md files across your repositories."
     if ask_yn "Install claude-md-management?"; then
         INSTALL_PLUGIN_CLAUDE_MD=1
@@ -304,7 +254,7 @@ resolve_dependencies() {
 
     # Node.js is needed for any npx-based MCP server or skill
     if [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_DOCS -eq 1 || \
-          $INSTALL_MCP_OMNISEARCH -eq 1 || $INSTALL_SKILL_XCODEBUILD -eq 1 ]]; then
+          $INSTALL_SKILL_XCODEBUILD -eq 1 ]]; then
         needs_node=true
     fi
 
@@ -382,8 +332,7 @@ phase_summary() {
 
     # MCP Servers
     if [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_SOSUMI -eq 1 || \
-          $INSTALL_MCP_SERENA -eq 1 || $INSTALL_MCP_DOCS -eq 1 || \
-          $INSTALL_MCP_OMNISEARCH -eq 1 ]]; then
+          $INSTALL_MCP_SERENA -eq 1 || $INSTALL_MCP_DOCS -eq 1 ]]; then
         has_mcps=true
         echo ""
         echo -e "  ${BOLD}MCP Servers:${NC}"
@@ -391,19 +340,17 @@ phase_summary() {
         [[ $INSTALL_MCP_SOSUMI -eq 1 ]]     && echo -e "    ✅ Sosumi (Apple docs)"
         [[ $INSTALL_MCP_SERENA -eq 1 ]]     && echo -e "    ✅ Serena (code intelligence)"
         [[ $INSTALL_MCP_DOCS -eq 1 ]]       && echo -e "    ✅ docs-mcp-server (semantic search)"
-        [[ $INSTALL_MCP_OMNISEARCH -eq 1 ]] && echo -e "    ✅ mcp-omnisearch (Perplexity)"
     fi
 
     # Plugins
     if [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 || $INSTALL_PLUGIN_PR_REVIEW -eq 1 || \
-          $INSTALL_PLUGIN_SIMPLIFIER -eq 1 || $INSTALL_PLUGIN_RALPH -eq 1 || \
-          $INSTALL_PLUGIN_HUD -eq 1 || $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]; then
+          $INSTALL_PLUGIN_RALPH -eq 1 || $INSTALL_PLUGIN_HUD -eq 1 || \
+          $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]; then
         has_plugins=true
         echo ""
         echo -e "  ${BOLD}Plugins:${NC}"
         [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 ]] && echo -e "    ✅ explanatory-output-style"
         [[ $INSTALL_PLUGIN_PR_REVIEW -eq 1 ]]   && echo -e "    ✅ pr-review-toolkit"
-        [[ $INSTALL_PLUGIN_SIMPLIFIER -eq 1 ]]  && echo -e "    ✅ code-simplifier"
         [[ $INSTALL_PLUGIN_RALPH -eq 1 ]]       && echo -e "    ✅ ralph-loop"
         [[ $INSTALL_PLUGIN_HUD -eq 1 ]]         && echo -e "    ✅ claude-hud"
         [[ $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]   && echo -e "    ✅ claude-md-management"
@@ -473,10 +420,10 @@ phase_install() {
     [[ "$ollama_setup_needed" == true ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_CLAUDE_CODE -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_SOSUMI -eq 1 || $INSTALL_MCP_SERENA -eq 1 || \
-       $INSTALL_MCP_DOCS -eq 1 || $INSTALL_MCP_OMNISEARCH -eq 1 ]] && total_steps=$((total_steps + 1))
+       $INSTALL_MCP_DOCS -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 || $INSTALL_PLUGIN_PR_REVIEW -eq 1 || \
-       $INSTALL_PLUGIN_SIMPLIFIER -eq 1 || $INSTALL_PLUGIN_RALPH -eq 1 || \
-       $INSTALL_PLUGIN_HUD -eq 1 || $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]] && total_steps=$((total_steps + 1))
+       $INSTALL_PLUGIN_RALPH -eq 1 || $INSTALL_PLUGIN_HUD -eq 1 || \
+       $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_SKILL_LEARNING -eq 1 || $INSTALL_SKILL_XCODEBUILD -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_CMD_PR -eq 1 ]] && total_steps=$((total_steps + 1))
     [[ $INSTALL_HOOKS -eq 1 ]] && total_steps=$((total_steps + 1))
@@ -593,8 +540,7 @@ phase_install() {
 
     # --- MCP Servers ---
     if [[ $INSTALL_MCP_XCODEBUILD -eq 1 || $INSTALL_MCP_SOSUMI -eq 1 || \
-          $INSTALL_MCP_SERENA -eq 1 || $INSTALL_MCP_DOCS -eq 1 || \
-          $INSTALL_MCP_OMNISEARCH -eq 1 ]]; then
+          $INSTALL_MCP_SERENA -eq 1 || $INSTALL_MCP_DOCS -eq 1 ]]; then
         current_step=$((current_step + 1))
         step $current_step $total_steps "Configuring MCP Servers"
 
@@ -645,22 +591,13 @@ phase_install() {
                     success "docs-mcp-server configured"
                 fi
             fi
-
-            if [[ $INSTALL_MCP_OMNISEARCH -eq 1 ]]; then
-                info "Adding mcp-omnisearch..."
-                if try_install "MCP: mcp-omnisearch" mcp_add mcp-omnisearch \
-                    -e "PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}" \
-                    -- npx -y mcp-omnisearch; then
-                    success "mcp-omnisearch configured"
-                fi
-            fi
         fi
     fi
 
     # --- Plugins ---
     if [[ $INSTALL_PLUGIN_EXPLANATORY -eq 1 || $INSTALL_PLUGIN_PR_REVIEW -eq 1 || \
-          $INSTALL_PLUGIN_SIMPLIFIER -eq 1 || $INSTALL_PLUGIN_RALPH -eq 1 || \
-          $INSTALL_PLUGIN_HUD -eq 1 || $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]; then
+          $INSTALL_PLUGIN_RALPH -eq 1 || $INSTALL_PLUGIN_HUD -eq 1 || \
+          $INSTALL_PLUGIN_CLAUDE_MD -eq 1 ]]; then
         current_step=$((current_step + 1))
         step $current_step $total_steps "Installing Plugins"
 
@@ -680,14 +617,6 @@ phase_install() {
                 if try_install "Plugin: pr-review-toolkit" \
                     fix_plugin pr-review-toolkit@claude-plugins-official; then
                     success "pr-review-toolkit installed"
-                fi
-            fi
-
-            if [[ $INSTALL_PLUGIN_SIMPLIFIER -eq 1 ]]; then
-                info "Installing code-simplifier..."
-                if try_install "Plugin: code-simplifier" \
-                    fix_plugin code-simplifier@claude-plugins-official; then
-                    success "code-simplifier installed"
                 fi
             fi
 
@@ -867,13 +796,6 @@ phase_summary_post() {
     echo ""
 
     step_num=$((step_num + 1))
-
-    if [[ "$PERPLEXITY_API_KEY" == "__ADD_YOUR_PERPLEXITY_API_KEY__" ]]; then
-        echo -e "    ${step_num}. Add your Perplexity API key to mcp-omnisearch:"
-        echo -e "       Edit ${BOLD}~/.claude.json${NC} → mcpServers → mcp-omnisearch → env → PERPLEXITY_API_KEY"
-        echo ""
-        step_num=$((step_num + 1))
-    fi
 
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "  Happy coding! 🚀"
