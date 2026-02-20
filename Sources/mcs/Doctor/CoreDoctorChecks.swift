@@ -176,9 +176,16 @@ struct MCPServerCheck: DoctorCheck, Sendable {
         guard FileManager.default.fileExists(atPath: claudeJSONPath.path) else {
             return .fail("~/.claude.json not found")
         }
-        guard let data = try? Data(contentsOf: claudeJSONPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let mcpServers = json["mcpServers"] as? [String: Any],
+        let data: Data
+        do {
+            data = try Data(contentsOf: claudeJSONPath)
+        } catch {
+            return .fail("cannot read ~/.claude.json: \(error.localizedDescription)")
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .fail("~/.claude.json contains invalid JSON")
+        }
+        guard let mcpServers = json["mcpServers"] as? [String: Any],
               mcpServers[serverName] != nil
         else {
             return .fail("not registered")
@@ -198,8 +205,14 @@ struct PluginCheck: DoctorCheck, Sendable {
 
     func check() -> CheckResult {
         let settingsURL = Environment().claudeSettings
-        guard let settings = try? Settings.load(from: settingsURL) else {
+        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
             return .fail("settings.json not found")
+        }
+        let settings: Settings
+        do {
+            settings = try Settings.load(from: settingsURL)
+        } catch {
+            return .fail("settings.json is invalid: \(error.localizedDescription)")
         }
         if settings.enabledPlugins?[pluginName] == true {
             return .pass("enabled")
@@ -274,8 +287,14 @@ struct HookEventCheck: DoctorCheck, Sendable {
 
     func check() -> CheckResult {
         let settingsURL = Environment().claudeSettings
-        guard let settings = try? Settings.load(from: settingsURL) else {
+        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
             return .fail("settings.json not found")
+        }
+        let settings: Settings
+        do {
+            settings = try Settings.load(from: settingsURL)
+        } catch {
+            return .fail("settings.json is invalid: \(error.localizedDescription)")
         }
         guard let hooks = settings.hooks, hooks[eventName] != nil else {
             return .fail("\(eventName) not registered in settings.json")
@@ -294,8 +313,14 @@ struct SettingsCheck: DoctorCheck, Sendable {
 
     func check() -> CheckResult {
         let settingsURL = Environment().claudeSettings
-        guard let settings = try? Settings.load(from: settingsURL) else {
-            return .fail("settings.json not found or invalid")
+        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
+            return .fail("settings.json not found")
+        }
+        let settings: Settings
+        do {
+            settings = try Settings.load(from: settingsURL)
+        } catch {
+            return .fail("settings.json is invalid: \(error.localizedDescription)")
         }
         var issues: [String] = []
         if settings.permissions?.defaultMode != "plan" {

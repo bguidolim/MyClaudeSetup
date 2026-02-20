@@ -448,7 +448,7 @@ struct Installer {
         do {
             try manifest.record(relativePath: relativePath, sourceFile: sourceFile)
         } catch {
-            output.warn("Could not record manifest entry for \(relativePath)")
+            output.warn("Could not record manifest entry for \(relativePath): \(error.localizedDescription)")
         }
     }
 
@@ -664,9 +664,15 @@ struct Installer {
             let hookFile = environment.hooksDirectory
                 .appendingPathComponent(contribution.hookName + ".sh")
 
-            guard fm.fileExists(atPath: hookFile.path),
-                  var content = try? String(contentsOf: hookFile, encoding: .utf8)
-            else { continue }
+            guard fm.fileExists(atPath: hookFile.path) else { continue }
+
+            var content: String
+            do {
+                content = try String(contentsOf: hookFile, encoding: .utf8)
+            } catch {
+                output.warn("Could not read hook file \(hookFile.lastPathComponent): \(error.localizedDescription)")
+                continue
+            }
 
             let version = MCSVersion.current
             let beginMarker = "# --- mcs:begin \(pack.identifier) v\(version) ---"
@@ -760,19 +766,27 @@ struct Installer {
 
         case .mcpServer(let config):
             // Same check as MCPServerCheck in doctor
-            guard fm.fileExists(atPath: environment.claudeJSON.path),
-                  let data = try? Data(contentsOf: environment.claudeJSON),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let servers = json["mcpServers"] as? [String: Any]
-            else { return false }
-            return servers[config.name] != nil
+            guard fm.fileExists(atPath: environment.claudeJSON.path) else { return false }
+            do {
+                let data = try Data(contentsOf: environment.claudeJSON)
+                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let servers = json?["mcpServers"] as? [String: Any]
+                return servers?[config.name] != nil
+            } catch {
+                output.warn("Could not read ~/.claude.json: \(error.localizedDescription)")
+                return false
+            }
 
         case .plugin(let name):
             // Same check as PluginCheck in doctor — look at settings.json
-            guard let settings = try? Settings.load(from: environment.claudeSettings) else {
+            guard fm.fileExists(atPath: environment.claudeSettings.path) else { return false }
+            do {
+                let settings = try Settings.load(from: environment.claudeSettings)
+                return settings.enabledPlugins?[name] == true
+            } catch {
+                output.warn("Could not read settings.json: \(error.localizedDescription)")
                 return false
             }
-            return settings.enabledPlugins?[name] == true
 
         case .copySkill(_, let destination):
             let dest = environment.skillsDirectory.appendingPathComponent(destination)

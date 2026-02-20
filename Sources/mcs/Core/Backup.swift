@@ -43,16 +43,22 @@ struct Backup {
         return backups
     }
 
-    /// Delete the given backup files. Returns paths that could not be deleted.
+    /// A backup deletion that failed, with the reason.
+    struct DeletionFailure {
+        let url: URL
+        let error: any Error
+    }
+
+    /// Delete the given backup files. Returns failures with error details.
     @discardableResult
-    static func deleteBackups(_ backups: [URL]) -> [URL] {
+    static func deleteBackups(_ backups: [URL]) -> [DeletionFailure] {
         let fm = FileManager.default
-        var failures: [URL] = []
+        var failures: [DeletionFailure] = []
         for backup in backups {
             do {
                 try fm.removeItem(at: backup)
             } catch {
-                failures.append(backup)
+                failures.append(DeletionFailure(url: backup, error: error))
             }
         }
         return failures

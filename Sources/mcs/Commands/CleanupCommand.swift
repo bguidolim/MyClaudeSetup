@@ -59,7 +59,10 @@ struct CleanupCommand: ParsableCommand {
             if failures.isEmpty {
                 output.success("Deleted \(deleted) backup file(s).")
             } else {
-                output.warn("Deleted \(deleted) backup(s), \(failures.count) could not be deleted.")
+                output.warn("Deleted \(deleted) backup(s), \(failures.count) could not be deleted:")
+                for failure in failures {
+                    output.warn("  \(failure.url.lastPathComponent): \(failure.error.localizedDescription)")
+                }
             }
         } else {
             output.info("No backups deleted.")

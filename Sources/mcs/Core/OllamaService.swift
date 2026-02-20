@@ -15,7 +15,7 @@ struct OllamaService: Sendable {
     /// Whether the nomic-embed-text model is available.
     func hasEmbeddingModel() -> Bool {
         let result = shell.run("/usr/bin/env", arguments: ["ollama", "list"])
-        return result.stdout.contains("nomic-embed-text")
+        return result.succeeded && result.stdout.contains("nomic-embed-text")
     }
 
     /// Attempt to start Ollama via brew services, then macOS app.
