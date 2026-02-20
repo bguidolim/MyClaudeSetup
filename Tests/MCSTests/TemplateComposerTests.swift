@@ -10,11 +10,11 @@ struct TemplateComposerTests {
     @Test("Compose core-only content with no pack contributions")
     func composeCoreOnly() {
         let result = TemplateComposer.compose(
-            coreContent: "Core instructions here",
-            coreVersion: "1.0.0"
+            coreContent: "Core instructions here"
         )
 
-        #expect(result.contains("<!-- mcs:begin core v1.0.0 -->"))
+        let version = MCSVersion.current
+        #expect(result.contains("<!-- mcs:begin core v\(version) -->"))
         #expect(result.contains("Core instructions here"))
         #expect(result.contains("<!-- mcs:end core -->"))
     }
@@ -23,22 +23,21 @@ struct TemplateComposerTests {
     func composeCoreAndPack() {
         let contribution = TemplateContribution(
             sectionIdentifier: "ios",
-            version: "2.0.0",
             templateContent: "iOS-specific content for __PROJECT__",
             placeholders: ["__PROJECT__"]
         )
 
         let result = TemplateComposer.compose(
             coreContent: "Core content",
-            coreVersion: "1.0.0",
             packContributions: [contribution],
             values: ["PROJECT": "MyApp"]
         )
 
-        #expect(result.contains("<!-- mcs:begin core v1.0.0 -->"))
+        let version = MCSVersion.current
+        #expect(result.contains("<!-- mcs:begin core v\(version) -->"))
         #expect(result.contains("Core content"))
         #expect(result.contains("<!-- mcs:end core -->"))
-        #expect(result.contains("<!-- mcs:begin ios v2.0.0 -->"))
+        #expect(result.contains("<!-- mcs:begin ios v\(version) -->"))
         #expect(result.contains("iOS-specific content for MyApp"))
         #expect(result.contains("<!-- mcs:end ios -->"))
     }
@@ -47,7 +46,6 @@ struct TemplateComposerTests {
     func composeSubstitutesCore() {
         let result = TemplateComposer.compose(
             coreContent: "Repo: __REPO_NAME__",
-            coreVersion: "1.0.0",
             values: ["REPO_NAME": "my-repo"]
         )
 
@@ -183,14 +181,12 @@ struct TemplateComposerTests {
     func composeParseRoundTrip() {
         let contribution = TemplateContribution(
             sectionIdentifier: "ios",
-            version: "1.5.0",
             templateContent: "iOS rules",
             placeholders: []
         )
 
         let composed = TemplateComposer.compose(
             coreContent: "Core rules",
-            coreVersion: "1.0.0",
             packContributions: [contribution]
         )
 

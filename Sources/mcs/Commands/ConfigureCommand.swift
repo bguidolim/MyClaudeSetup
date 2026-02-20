@@ -82,9 +82,14 @@ struct ConfigureCommand: ParsableCommand {
             .appendingPathComponent("CLAUDE.local.md")
         let coreTemplate = try String(contentsOf: coreTemplatePath, encoding: .utf8)
 
-        // Strip existing markers from the template file (they'll be re-added by compose)
+        // Strip existing markers from the template file (they'll be re-added by compose).
+        // Use regex to match any version in the marker.
         let strippedCore = coreTemplate
-            .replacingOccurrences(of: "<!-- mcs:begin core v2.0.0 -->\n", with: "")
+            .replacingOccurrences(
+                of: #"<!-- mcs:begin core v[0-9]+\.[0-9]+\.[0-9]+ -->\n"#,
+                with: "",
+                options: .regularExpression
+            )
             .replacingOccurrences(of: "\n<!-- mcs:end core -->", with: "")
             .replacingOccurrences(of: "<!-- mcs:end core -->\n", with: "")
 
@@ -96,7 +101,7 @@ struct ConfigureCommand: ParsableCommand {
             }
         }
 
-        let coreVersion = MCS.configuration.version
+        let version = MCSVersion.current
         let claudeLocalPath = projectPath.appendingPathComponent("CLAUDE.local.md")
         let fm = FileManager.default
 
@@ -112,7 +117,7 @@ struct ConfigureCommand: ParsableCommand {
                 in: existingContent,
                 sectionIdentifier: "core",
                 newContent: processedCore,
-                newVersion: coreVersion
+                newVersion: version
             )
 
             // Update pack sections
@@ -125,7 +130,7 @@ struct ConfigureCommand: ParsableCommand {
                     in: updated,
                     sectionIdentifier: contribution.sectionIdentifier,
                     newContent: processedContent,
-                    newVersion: contribution.version
+                    newVersion: version
                 )
             }
 
@@ -143,7 +148,6 @@ struct ConfigureCommand: ParsableCommand {
         } else {
             composed = TemplateComposer.compose(
                 coreContent: strippedCore,
-                coreVersion: coreVersion,
                 packContributions: packContributions,
                 values: values
             )

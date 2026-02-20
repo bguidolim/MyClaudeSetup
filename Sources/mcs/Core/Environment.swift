@@ -6,6 +6,7 @@ struct Environment: Sendable {
     let claudeDirectory: URL
     let claudeJSON: URL
     let claudeSettings: URL
+    let settingsKeys: URL
     let hooksDirectory: URL
     let skillsDirectory: URL
     let commandsDirectory: URL
@@ -31,6 +32,7 @@ struct Environment: Sendable {
         self.claudeDirectory = claudeDir
         self.claudeJSON = home.appendingPathComponent(".claude.json")
         self.claudeSettings = claudeDir.appendingPathComponent("settings.json")
+        self.settingsKeys = claudeDir.appendingPathComponent(".mcs-settings-keys")
         self.hooksDirectory = claudeDir.appendingPathComponent("hooks")
         self.skillsDirectory = claudeDir.appendingPathComponent("skills")
         self.commandsDirectory = claudeDir.appendingPathComponent("commands")

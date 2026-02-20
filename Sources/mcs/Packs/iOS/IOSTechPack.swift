@@ -12,7 +12,6 @@ struct IOSTechPack: TechPack {
     let templates: [TemplateContribution] = [
         TemplateContribution(
             sectionIdentifier: "ios",
-            version: "1.0.0",
             templateContent: IOSTemplates.claudeLocalSection,
             placeholders: ["__PROJECT__"]
         ),

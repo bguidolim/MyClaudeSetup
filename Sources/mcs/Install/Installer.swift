@@ -542,8 +542,24 @@ struct Installer {
 
             _ = try? backup.backupFile(at: destURL)
 
+            // Remove stale keys that mcs previously owned but are no longer in the template
+            var ownership = SettingsOwnership(path: environment.settingsKeys)
+            let stale = ownership.staleKeys(comparedTo: template)
+            if !stale.isEmpty {
+                existing.removeKeys(stale)
+                for key in stale {
+                    ownership.remove(keyPath: key)
+                }
+                output.dimmed("Removed \(stale.count) stale setting(s): \(stale.joined(separator: ", "))")
+            }
+
             existing.merge(with: template)
             try existing.save(to: destURL)
+
+            // Record ownership of all template keys
+            ownership.recordAll(from: template, version: MCSVersion.current)
+            try? ownership.save()
+
             return true
         } catch {
             // Fallback: just copy the template settings
@@ -557,6 +573,14 @@ struct Installer {
                     _ = try? backup.backupFile(at: destURL)
                     try fm.copyItem(at: sourceURL, to: destURL)
                 }
+
+                // Record ownership even in fallback
+                if let template = try? Settings.load(from: sourceURL) {
+                    var ownership = SettingsOwnership(path: environment.settingsKeys)
+                    ownership.recordAll(from: template, version: MCSVersion.current)
+                    try? ownership.save()
+                }
+
                 return true
             } catch {
                 output.dimmed(error.localizedDescription)
@@ -592,11 +616,15 @@ struct Installer {
                   var content = try? String(contentsOf: hookFile, encoding: .utf8)
             else { continue }
 
-            let beginMarker = "# --- mcs:begin \(pack.identifier) ---"
+            let version = MCSVersion.current
+            let beginMarker = "# --- mcs:begin \(pack.identifier) v\(version) ---"
             let endMarker = "# --- mcs:end \(pack.identifier) ---"
 
-            // Remove existing section for idempotency
-            if let beginRange = content.range(of: beginMarker),
+            // Remove existing section for idempotency (matches both versioned and unversioned markers)
+            if let beginRange = content.range(
+                of: #"# --- mcs:begin \#(pack.identifier)( v[0-9]+\.[0-9]+\.[0-9]+)? ---"#,
+                options: .regularExpression
+            ),
                let endRange = content.range(of: endMarker) {
                 // Include trailing newline if present
                 var removeEnd = endRange.upperBound

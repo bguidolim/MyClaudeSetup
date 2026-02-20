@@ -62,6 +62,7 @@ extension DoctorRunner {
 
         // Settings
         checks.append(SettingsCheck())
+        checks.append(SettingsOwnershipCheck())
 
         // Gitignore
         checks.append(GitignoreCheck())
@@ -322,6 +323,43 @@ struct SettingsCheck: DoctorCheck, Sendable {
     }
 }
 
+struct SettingsOwnershipCheck: DoctorCheck, Sendable {
+    var name: String { "Settings ownership" }
+    var section: String { "Settings" }
+
+    func check() -> CheckResult {
+        let env = Environment()
+        let ownership = SettingsOwnership(path: env.settingsKeys)
+
+        guard !ownership.managedKeys.isEmpty else {
+            return .skip("no ownership sidecar — run 'mcs install' to create")
+        }
+
+        // Load current template to find stale keys
+        guard let resourceURL = Bundle.main.url(forResource: "Resources", withExtension: nil)
+        else {
+            return .skip("resources bundle not found")
+        }
+
+        let templateURL = resourceURL
+            .appendingPathComponent("config")
+            .appendingPathComponent("settings.json")
+        guard let template = try? Settings.load(from: templateURL) else {
+            return .skip("could not load settings template")
+        }
+
+        let stale = ownership.staleKeys(comparedTo: template)
+        if stale.isEmpty {
+            return .pass("\(ownership.managedKeys.count) managed key(s), none stale")
+        }
+        return .warn("\(stale.count) stale key(s): \(stale.joined(separator: ", "))")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs install' to clean up stale settings")
+    }
+}
+
 struct GitignoreCheck: DoctorCheck, Sendable {
     var name: String { "Global gitignore" }
     var section: String { "Gitignore" }
@@ -478,6 +516,7 @@ struct PackMigrationCheck: DoctorCheck, Sendable {
 // MARK: - Hook contribution check
 
 /// Checks that a pack's hook contribution has been injected into the installed hook file.
+/// Compares both presence and version/content freshness using `MCSVersion.current`.
 struct HookContributionCheck: DoctorCheck, Sendable {
     let packIdentifier: String
     let packDisplayName: String
@@ -491,6 +530,7 @@ struct HookContributionCheck: DoctorCheck, Sendable {
         let hookFile = env.hooksDirectory
             .appendingPathComponent(contribution.hookName + ".sh")
         let fm = FileManager.default
+        let expectedVersion = MCSVersion.current
 
         guard fm.fileExists(atPath: hookFile.path) else {
             return .skip("hook file \(contribution.hookName).sh not installed")
@@ -500,14 +540,52 @@ struct HookContributionCheck: DoctorCheck, Sendable {
             return .fail("could not read \(contribution.hookName).sh")
         }
 
-        let beginMarker = "# --- mcs:begin \(packIdentifier) ---"
-        if content.contains(beginMarker) {
-            return .pass("fragment injected")
+        // Check for current-version marker
+        let versionedMarker = "# --- mcs:begin \(packIdentifier) v\(expectedVersion) ---"
+        if content.contains(versionedMarker) {
+            // Version matches — check content for drift
+            let endMarker = "# --- mcs:end \(packIdentifier) ---"
+            if let beginRange = content.range(of: versionedMarker),
+               let endRange = content.range(of: endMarker) {
+                let installed = String(content[beginRange.upperBound..<endRange.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let expected = contribution.scriptFragment
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if installed == expected {
+                    return .pass("v\(expectedVersion) up to date")
+                }
+                return .warn("v\(expectedVersion) content drifted — run 'mcs install' to refresh")
+            }
+            return .pass("v\(expectedVersion) injected")
         }
+
+        // Check for any version or unversioned marker (outdated or legacy)
+        let pattern = #"# --- mcs:begin \#(packIdentifier)( v[0-9]+\.[0-9]+\.[0-9]+)? ---"#
+        if content.range(of: pattern, options: .regularExpression) != nil {
+            if let installedVersion = parseInstalledVersion(from: content) {
+                return .warn("v\(installedVersion) installed, v\(expectedVersion) available — run 'mcs install'")
+            }
+            return .warn("unversioned fragment installed, v\(expectedVersion) available — run 'mcs install'")
+        }
+
         return .fail("fragment not injected — run 'mcs install' to fix")
     }
 
     func fix() -> FixResult {
         .notFixable("Run 'mcs install' to inject hook contributions")
+    }
+
+    /// Extract the version from an installed marker like `# --- mcs:begin ios v1.0.0 ---`
+    private func parseInstalledVersion(from content: String) -> String? {
+        let pattern = #"# --- mcs:begin \#(packIdentifier) v([0-9]+\.[0-9]+\.[0-9]+) ---"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                  in: content,
+                  range: NSRange(content.startIndex..., in: content)
+              ),
+              match.numberOfRanges >= 2,
+              let versionRange = Range(match.range(at: 1), in: content)
+        else { return nil }
+        return String(content[versionRange])
     }
 }

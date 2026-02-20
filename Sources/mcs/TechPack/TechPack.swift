@@ -19,7 +19,6 @@ struct ProjectContext: Sendable {
 /// Template contribution from a tech pack
 struct TemplateContribution: Sendable {
     let sectionIdentifier: String // e.g., "ios"
-    let version: String // e.g., "1.0.0"
     let templateContent: String // The template content with placeholders
     let placeholders: [String] // Required placeholder names (e.g., ["__PROJECT__"])
 }

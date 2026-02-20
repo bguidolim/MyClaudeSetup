@@ -81,6 +81,34 @@ struct Settings: Codable, Sendable {
         }
     }
 
+    // MARK: - Stale key removal
+
+    /// Remove settings keys that mcs previously owned but are no longer in the template.
+    /// Key paths use dot notation: `env.KEY`, `permissions.defaultMode`, `enabledPlugins.NAME`.
+    mutating func removeKeys(_ keyPaths: [String]) {
+        for keyPath in keyPaths {
+            let parts = keyPath.split(separator: ".", maxSplits: 1)
+            if parts.count == 2 {
+                let section = String(parts[0])
+                let key = String(parts[1])
+                switch section {
+                case "env":
+                    env?.removeValue(forKey: key)
+                case "permissions":
+                    if key == "defaultMode" { permissions?.defaultMode = nil }
+                case "hooks":
+                    hooks?.removeValue(forKey: key)
+                case "enabledPlugins":
+                    enabledPlugins?.removeValue(forKey: key)
+                default:
+                    break
+                }
+            } else if keyPath == "alwaysThinkingEnabled" {
+                alwaysThinkingEnabled = nil
+            }
+        }
+    }
+
     // MARK: - File I/O
 
     /// Load settings from a JSON file. Returns empty settings if file doesn't exist.

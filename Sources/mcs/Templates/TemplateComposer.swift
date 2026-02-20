@@ -21,17 +21,18 @@ enum TemplateComposer {
     // MARK: - Composition
 
     /// Compose a file from core content and tech pack contributions.
+    /// Uses `MCSVersion.current` for all section markers.
     static func compose(
         coreContent: String,
-        coreVersion: String,
         packContributions: [TemplateContribution] = [],
         values: [String: String] = [:]
     ) -> String {
+        let version = MCSVersion.current
         var parts: [String] = []
 
         // Core section
         let processedCore = TemplateEngine.substitute(template: coreContent, values: values)
-        parts.append(beginMarker(identifier: "core", version: coreVersion))
+        parts.append(beginMarker(identifier: "core", version: version))
         parts.append(processedCore)
         parts.append(endMarker(identifier: "core"))
 
@@ -44,7 +45,7 @@ enum TemplateComposer {
             parts.append("")
             parts.append(beginMarker(
                 identifier: contribution.sectionIdentifier,
-                version: contribution.version
+                version: version
             ))
             parts.append(processedContent)
             parts.append(endMarker(identifier: contribution.sectionIdentifier))
