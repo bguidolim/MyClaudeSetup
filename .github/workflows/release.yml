@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - '*'
 
 permissions:
   contents: write
@@ -34,7 +34,7 @@ jobs:
           TARBALL: ${{ env.TARBALL }}
         run: |
           gh release create "${TAG_NAME}" \
-            --title "My Claude Setup ${TAG_NAME}" \
+            --verify-tag \
             --generate-notes \
             "${TARBALL}" SHA256SUMS
 
