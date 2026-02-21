@@ -63,7 +63,7 @@ enum HookInjector {
         let section = "    \(beginMarker)\n\(fragment)\n    \(endMarker)"
 
         // Insert at the hook-extensions marker
-        let extensionMarker = "    # --- mcs:hook-extensions ---"
+        let extensionMarker = "    \(Constants.Hooks.extensionMarker)"
         guard let markerRange = content.range(of: extensionMarker) else {
             output.error("Missing '# --- mcs:hook-extensions ---' marker in \(hookFile.lastPathComponent) — cannot inject \(identifier) fragment")
             return

@@ -24,8 +24,8 @@ struct ClaudeIntegration: Sendable {
         var args = ["mcp", "add", "-s", scope, name]
         args.append(contentsOf: arguments)
         return shell.run(
-            "/usr/bin/env",
-            arguments: ["claude"] + args,
+            Constants.CLI.env,
+            arguments: [Constants.CLI.claudeCommand] + args,
             additionalEnvironment: claudeEnv
         )
     }
@@ -34,7 +34,7 @@ struct ClaudeIntegration: Sendable {
     @discardableResult
     func mcpRemove(name: String, scope: String = "user") -> ShellResult {
         shell.run(
-            "/usr/bin/env",
+            Constants.CLI.env,
             arguments: ["claude", "mcp", "remove", "-s", scope, name],
             additionalEnvironment: claudeEnv
         )
@@ -46,7 +46,7 @@ struct ClaudeIntegration: Sendable {
     @discardableResult
     func pluginMarketplaceAdd(repo: String) -> ShellResult {
         shell.run(
-            "/usr/bin/env",
+            Constants.CLI.env,
             arguments: ["claude", "plugin", "marketplace", "add", repo],
             additionalEnvironment: claudeEnv
         )
@@ -60,8 +60,8 @@ struct ClaudeIntegration: Sendable {
         if parts.count == 2 {
             let marketplace = String(parts[1])
             let repo: String? = switch marketplace {
-            case "claude-plugins-official":
-                "anthropics/claude-plugins-official"
+            case Constants.Plugins.officialMarketplace:
+                Constants.Plugins.officialMarketplaceRepo
             default:
                 nil
             }
@@ -71,7 +71,7 @@ struct ClaudeIntegration: Sendable {
         }
 
         return shell.run(
-            "/usr/bin/env",
+            Constants.CLI.env,
             arguments: ["claude", "plugin", "install", fullName],
             additionalEnvironment: claudeEnv
         )
@@ -81,7 +81,7 @@ struct ClaudeIntegration: Sendable {
     @discardableResult
     func pluginRemove(fullName: String) -> ShellResult {
         shell.run(
-            "/usr/bin/env",
+            Constants.CLI.env,
             arguments: ["claude", "plugin", "remove", fullName],
             additionalEnvironment: claudeEnv
         )
