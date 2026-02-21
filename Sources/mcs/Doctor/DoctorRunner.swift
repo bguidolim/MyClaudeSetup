@@ -46,7 +46,19 @@ struct DoctorRunner {
             } else {
                 // 3. Fallback: infer from CLAUDE.local.md section markers
                 let claudeLocal = root.appendingPathComponent("CLAUDE.local.md")
-                if let content = try? String(contentsOf: claudeLocal, encoding: .utf8) {
+                let claudeLocalContent: String?
+                if FileManager.default.fileExists(atPath: claudeLocal.path) {
+                    do {
+                        claudeLocalContent = try String(contentsOf: claudeLocal, encoding: .utf8)
+                    } catch {
+                        output.warn("Could not read CLAUDE.local.md: \(error.localizedDescription)")
+                        claudeLocalContent = nil
+                    }
+                } else {
+                    claudeLocalContent = nil
+                }
+
+                if let content = claudeLocalContent {
                     let sections = TemplateComposer.parseSections(from: content)
                     let inferred = Set(sections.map(\.identifier).filter { $0 != "core" })
                     if !inferred.isEmpty {
@@ -106,7 +118,7 @@ struct DoctorRunner {
             ))
         }
 
-        // Wrap pack migrations as DoctorCheck adapters
+        // Layer 6 (cont.): Pack migrations as DoctorCheck adapters
         for (pack, migration) in registry.migrations(installedPacks: installedPackIDs) {
             allChecks.append(PackMigrationCheck(migration: migration, packName: pack.displayName))
         }

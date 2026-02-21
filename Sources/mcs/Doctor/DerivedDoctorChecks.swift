@@ -86,21 +86,27 @@ struct SkillFreshnessCheck: DoctorCheck, Sendable {
             return .warn("present but not hash-tracked — run 'mcs install' to refresh")
         }
 
-        // Compare per-file hashes
+        // Compare per-file hashes, detect missing and drifted files
         var drifted: [String] = []
+        var missing: [String] = []
         for relativePath in trackedFiles {
             let fileName = String(relativePath.dropFirst(prefix.count))
             let installedFile = destDir.appendingPathComponent(fileName)
-            if let matches = manifest.check(relativePath: relativePath, installedFile: installedFile),
-               !matches {
+            if !FileManager.default.fileExists(atPath: installedFile.path) {
+                missing.append(fileName)
+            } else if let matches = manifest.check(relativePath: relativePath, installedFile: installedFile),
+                      !matches {
                 drifted.append(fileName)
             }
         }
 
-        if drifted.isEmpty {
-            return .pass("present, up to date")
+        if !missing.isEmpty {
+            return .fail("missing files: \(missing.joined(separator: ", ")) — run 'mcs install' to restore")
         }
-        return .warn("drifted: \(drifted.joined(separator: ", ")) — run 'mcs install' to refresh")
+        if !drifted.isEmpty {
+            return .warn("drifted: \(drifted.joined(separator: ", ")) — run 'mcs install' to refresh")
+        }
+        return .pass("present, up to date")
     }
 
     func fix() -> FixResult {

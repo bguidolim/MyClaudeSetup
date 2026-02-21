@@ -37,36 +37,44 @@ struct ProjectState {
         data["MCS_VERSION"]
     }
 
-    /// Save to disk.
-    func save() throws {
+    /// Save to disk. Updates internal state with timestamp and version.
+    mutating func save() throws {
         let fm = FileManager.default
         let dir = path.deletingLastPathComponent()
         if !fm.fileExists(atPath: dir.path) {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
 
-        var updatedData = data
-        updatedData["CONFIGURED_AT"] = ISO8601DateFormatter().string(from: Date())
-        updatedData["MCS_VERSION"] = MCSVersion.current
+        data["CONFIGURED_AT"] = ISO8601DateFormatter().string(from: Date())
+        data["MCS_VERSION"] = MCSVersion.current
 
-        let lines = updatedData
+        let lines = data
             .sorted(by: { $0.key < $1.key })
             .map { "\($0.key)=\($0.value)" }
         let content = lines.joined(separator: "\n") + "\n"
         try content.write(to: path, atomically: true, encoding: .utf8)
     }
 
+    /// Non-nil if `load()` encountered an error reading an existing file.
+    /// Callers can check this to distinguish "file doesn't exist" from "file is corrupt/unreadable".
+    private(set) var loadError: Error?
+
     // MARK: - Private
 
     private mutating func load() {
-        guard let content = try? String(contentsOf: path, encoding: .utf8) else { return }
-        for line in content.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty,
-                  let eqIndex = trimmed.firstIndex(of: "=") else { continue }
-            let key = String(trimmed[trimmed.startIndex..<eqIndex])
-            let value = String(trimmed[trimmed.index(after: eqIndex)...])
-            data[key] = value
+        guard FileManager.default.fileExists(atPath: path.path) else { return }
+        do {
+            let content = try String(contentsOf: path, encoding: .utf8)
+            for line in content.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty,
+                      let eqIndex = trimmed.firstIndex(of: "=") else { continue }
+                let key = String(trimmed[trimmed.startIndex..<eqIndex])
+                let value = String(trimmed[trimmed.index(after: eqIndex)...])
+                data[key] = value
+            }
+        } catch {
+            self.loadError = error
         }
     }
 }

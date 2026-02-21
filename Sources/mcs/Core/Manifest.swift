@@ -135,7 +135,10 @@ struct Manifest: Sendable {
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return []
+            throw MCSError.fileOperationFailed(
+                path: resolvedURL.path,
+                reason: "Could not enumerate directory contents"
+            )
         }
 
         var results: [(relativePath: String, hash: String)] = []

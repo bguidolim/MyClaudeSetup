@@ -97,6 +97,24 @@ struct DerivedDoctorCheckTests {
         #expect(check?.section == "Hooks")
     }
 
+    @Test("copyCommand action derives CommandFileCheck")
+    func copyCommandDerivation() {
+        let component = ComponentDefinition(
+            id: "test.command",
+            displayName: "test-command",
+            description: "test",
+            type: .command,
+            packIdentifier: nil,
+            dependencies: [],
+            isRequired: false,
+            installAction: .copyCommand(source: "commands/test.md", destination: "test.md", placeholders: [:])
+        )
+        let check = component.deriveDoctorCheck()
+        #expect(check != nil)
+        #expect(check?.name == "test-command")
+        #expect(check?.section == "Commands")
+    }
+
     @Test("shellCommand action returns nil (not derivable)")
     func shellCommandReturnsNil() {
         let component = ComponentDefinition(

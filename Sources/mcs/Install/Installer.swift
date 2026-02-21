@@ -771,6 +771,9 @@ struct Installer {
     /// Check if a component is already installed.
     /// Delegates to the same derived + supplementary doctor checks used by `mcs doctor`,
     /// ensuring install and doctor always use the same detection logic.
+    /// Returns true if ANY check (derived OR supplementary) passes — this means
+    /// a component with a passing supplementary check is considered installed even
+    /// if its derived check fails.
     private func isAlreadyInstalled(_ component: ComponentDefinition) -> Bool {
         // Idempotent actions: always re-run
         switch component.installAction {

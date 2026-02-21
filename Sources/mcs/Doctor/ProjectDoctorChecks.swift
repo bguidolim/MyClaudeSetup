@@ -22,8 +22,14 @@ struct CLAUDELocalVersionCheck: DoctorCheck, Sendable {
 
     func check() -> CheckResult {
         let claudeLocal = projectRoot.appendingPathComponent("CLAUDE.local.md")
-        guard let content = try? String(contentsOf: claudeLocal, encoding: .utf8) else {
+        guard FileManager.default.fileExists(atPath: claudeLocal.path) else {
             return .skip("CLAUDE.local.md not found")
+        }
+        let content: String
+        do {
+            content = try String(contentsOf: claudeLocal, encoding: .utf8)
+        } catch {
+            return .fail("CLAUDE.local.md exists but could not be read: \(error.localizedDescription)")
         }
 
         let sections = TemplateComposer.parseSections(from: content)
@@ -68,9 +74,14 @@ struct ProjectSerenaMemoryCheck: DoctorCheck, Sendable {
         guard fm.fileExists(atPath: serenaDir.path) else {
             return .pass("no .serena/memories/ found")
         }
-        guard let contents = try? fm.contentsOfDirectory(atPath: serenaDir.path),
-              !contents.isEmpty else {
-            return .pass("no .serena/memories/ found")
+        let contents: [String]
+        do {
+            contents = try fm.contentsOfDirectory(atPath: serenaDir.path)
+        } catch {
+            return .warn(".serena/memories/ exists but could not be read: \(error.localizedDescription)")
+        }
+        guard !contents.isEmpty else {
+            return .pass(".serena/memories/ exists but is empty")
         }
         return .warn(".serena/memories/ has \(contents.count) file(s) — migrate to .claude/memories/")
     }
@@ -133,8 +144,11 @@ struct ProjectStateFileCheck: DoctorCheck, Sendable {
 
     func fix() -> FixResult {
         let claudeLocal = projectRoot.appendingPathComponent("CLAUDE.local.md")
-        guard let content = try? String(contentsOf: claudeLocal, encoding: .utf8) else {
-            return .failed("could not read CLAUDE.local.md")
+        let content: String
+        do {
+            content = try String(contentsOf: claudeLocal, encoding: .utf8)
+        } catch {
+            return .failed("could not read CLAUDE.local.md: \(error.localizedDescription)")
         }
 
         // Infer packs from section markers

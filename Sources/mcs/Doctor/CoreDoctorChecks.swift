@@ -1,10 +1,5 @@
 import Foundation
 
-// The coreDoctorChecks() factory has been replaced by component-derived checks.
-// Doctor checks are now auto-derived from ComponentDefinition.installAction
-// (see DerivedDoctorChecks.swift), with supplementary checks attached to
-// individual components, and standalone checks in DoctorRunner.standaloneDoctorChecks().
-
 // MARK: - Check implementations
 
 struct CommandCheck: DoctorCheck, Sendable {
@@ -32,56 +27,6 @@ struct CommandCheck: DoctorCheck, Sendable {
         let shell = ShellRunner(environment: Environment())
         let result = shell.shell(action)
         return result.succeeded ? .fixed("installed \(name)") : .failed(result.stderr)
-    }
-}
-
-/// Checks that Ollama is installed, running, and has the embedding model.
-/// Legacy check — used by standaloneDoctorChecks(). For the derived-checks
-/// architecture, binary existence is auto-derived from .brewInstall("ollama")
-/// and OllamaRuntimeCheck handles daemon + model.
-struct OllamaCheck: DoctorCheck, Sendable {
-    var name: String { "Ollama" }
-    var section: String { "Dependencies" }
-
-    func check() -> CheckResult {
-        let env = Environment()
-        let shell = ShellRunner(environment: env)
-        let ollama = OllamaService(shell: shell, environment: env)
-
-        guard shell.commandExists("ollama") else {
-            return .fail("not installed")
-        }
-        guard ollama.isRunning() else {
-            return .fail("installed but not running")
-        }
-        guard ollama.hasEmbeddingModel() else {
-            return .fail("running but nomic-embed-text model not installed")
-        }
-        return .pass("running with nomic-embed-text")
-    }
-
-    func fix() -> FixResult {
-        let env = Environment()
-        let shell = ShellRunner(environment: env)
-        let ollama = OllamaService(shell: shell, environment: env)
-
-        guard shell.commandExists("ollama") else {
-            return .notFixable("Install Ollama via 'brew install ollama' or https://ollama.com/download")
-        }
-
-        guard ollama.start() else {
-            return .failed("Ollama did not start — try 'ollama serve' or open the Ollama app manually")
-        }
-
-        if let result = ollama.pullEmbeddingModelIfNeeded(), !result.succeeded {
-            return .failed("Could not pull nomic-embed-text: \(result.stderr)")
-        }
-
-        let verifyResult = check()
-        if case .pass = verifyResult {
-            return .fixed("Ollama running with nomic-embed-text")
-        }
-        return .failed("Ollama fix attempted but verification failed")
     }
 }
 
@@ -126,7 +71,11 @@ struct OllamaRuntimeCheck: DoctorCheck, Sendable {
             return .failed("Could not pull nomic-embed-text: \(result.stderr)")
         }
 
-        return .fixed("Ollama running with nomic-embed-text")
+        // Verify the fix actually worked
+        if case .pass = check() {
+            return .fixed("Ollama running with nomic-embed-text")
+        }
+        return .failed("Ollama fix attempted but verification failed")
     }
 }
 

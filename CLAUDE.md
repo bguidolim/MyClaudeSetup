@@ -35,20 +35,28 @@ mcs cleanup                      # Find and delete backup files
 
 ### Core (`Sources/mcs/Core/`)
 - `Environment.swift` — paths, arch detection, brew path, shell RC
-- `CLIOutput.swift` — ANSI colors, logging, prompts
+- `CLIOutput.swift` — ANSI colors, logging, prompts, doctor summary
 - `ShellRunner.swift` — Process execution wrapper
 - `Settings.swift` — Codable model, deep-merge (replaces jq)
-- `Manifest.swift` — SHA-256 tracking via CryptoKit
+- `Manifest.swift` — SHA-256 tracking via CryptoKit, per-file directory hashing
 - `Backup.swift` — timestamped backups before file writes
 - `GitignoreManager.swift` — global gitignore management
 - `ClaudeIntegration.swift` — `claude mcp add`, `claude plugin install`
 - `Homebrew.swift` — brew detection, package install
+- `ProjectDetector.swift` — walk-up project root detection (`.git/` or `CLAUDE.local.md`)
+- `ProjectState.swift` — per-project `.mcs-project` state (configured packs, version)
 
 ### TechPack System (`Sources/mcs/TechPack/`)
 - `TechPack.swift` — protocol for tech packs (components, templates, hooks, doctor checks)
 - `Component.swift` — ComponentDefinition with install actions
 - `TechPackRegistry.swift` — registry of available packs
 - `DependencyResolver.swift` — topological sort of component dependencies
+
+### Doctor (`Sources/mcs/Doctor/`)
+- `DoctorRunner.swift` — 7-layer check orchestration with project-aware pack resolution
+- `CoreDoctorChecks.swift` — check structs (CommandCheck, MCPServerCheck, PluginCheck, etc.)
+- `DerivedDoctorChecks.swift` — `deriveDoctorCheck()` extension on ComponentDefinition + SkillFreshnessCheck
+- `ProjectDoctorChecks.swift` — project-scoped checks (version, Serena migration, state file)
 
 ### Commands (`Sources/mcs/Commands/`)
 - `InstallCommand.swift` — 5-phase install flow with interactive selection
@@ -63,7 +71,7 @@ mcs cleanup                      # Find and delete backup files
 ### iOS Pack (`Sources/mcs/Packs/iOS/`)
 - `IOSTechPack.swift` — TechPack conformance
 - `IOSComponents.swift` — XcodeBuildMCP, Sosumi, xcodebuildmcp skill
-- `IOSDoctorChecks.swift` — Xcode CLT, MCP server checks
+- `IOSDoctorChecks.swift` — Xcode CLT, pack-level supplementary checks
 
 ### Resources (`Sources/mcs/Resources/`)
 Bundled with the binary via SwiftPM `.copy()`:
@@ -84,3 +92,5 @@ Bundled with the binary via SwiftPM `.copy()`:
 - **Settings deep-merge**: native Swift Codable replaces jq; hooks deduplicate by command, plugins merge additively
 - **Backup on every write**: timestamped backup created before any file modification
 - **Manifest tracking**: SHA-256 hashes + installed pack IDs in `~/.claude/.mcs-manifest` for doctor scoping and freshness checks
+- **Component-derived doctor checks**: `ComponentDefinition` is the single source of truth — `deriveDoctorCheck()` auto-generates verification from `installAction`, supplementary checks handle extras; both install and doctor share the same detection logic
+- **Project awareness**: doctor detects project root (walk-up for `.git/`), resolves packs from `.claude/.mcs-project` before falling back to global manifest
