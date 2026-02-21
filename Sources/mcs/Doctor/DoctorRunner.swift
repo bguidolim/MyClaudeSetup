@@ -25,28 +25,91 @@ struct DoctorRunner {
         let manifest = Manifest(path: env.setupManifest)
         let registry = TechPackRegistry.shared
 
-        // Determine which packs to check
+        // Detect project root
+        let projectRoot = ProjectDetector.findProjectRoot()
+        let projectName = projectRoot?.lastPathComponent
+
+        // Determine which packs to check (priority: flag > project > section markers > global)
         let installedPackIDs: Set<String>
+        let packSource: String
+
         if let filter = packFilter {
+            // 1. Explicit --pack flag
             installedPackIDs = Set(filter.components(separatedBy: ","))
+            packSource = "--pack flag"
+        } else if let root = projectRoot {
+            let state = ProjectState(projectRoot: root)
+            if state.exists, !state.configuredPacks.isEmpty {
+                // 2. Project .mcs-project file
+                installedPackIDs = state.configuredPacks
+                packSource = "project: \(projectName ?? "unknown")"
+            } else {
+                // 3. Fallback: infer from CLAUDE.local.md section markers
+                let claudeLocal = root.appendingPathComponent("CLAUDE.local.md")
+                let claudeLocalContent: String?
+                if FileManager.default.fileExists(atPath: claudeLocal.path) {
+                    do {
+                        claudeLocalContent = try String(contentsOf: claudeLocal, encoding: .utf8)
+                    } catch {
+                        output.warn("Could not read CLAUDE.local.md: \(error.localizedDescription)")
+                        claudeLocalContent = nil
+                    }
+                } else {
+                    claudeLocalContent = nil
+                }
+
+                if let content = claudeLocalContent {
+                    let sections = TemplateComposer.parseSections(from: content)
+                    let inferred = Set(sections.map(\.identifier).filter { $0 != "core" })
+                    if !inferred.isEmpty {
+                        installedPackIDs = inferred
+                        packSource = "project: \(projectName ?? "unknown") (inferred)"
+                    } else {
+                        installedPackIDs = manifest.installedPacks
+                        packSource = "global"
+                    }
+                } else {
+                    installedPackIDs = manifest.installedPacks
+                    packSource = "global"
+                }
+            }
         } else {
+            // 4. Not in a project — fall back to global manifest
             installedPackIDs = manifest.installedPacks
+            packSource = "global"
         }
 
         if !installedPackIDs.isEmpty {
-            output.dimmed("Installed packs: \(installedPackIDs.sorted().joined(separator: ", "))")
+            output.dimmed("Packs (\(packSource)): \(installedPackIDs.sorted().joined(separator: ", "))")
+        } else {
+            output.dimmed("No packs detected (\(packSource))")
         }
 
-        // Collect all checks: core + installed pack checks + migrations + hook contributions
-        var allChecks: [any DoctorCheck] = coreDoctorChecks()
-        allChecks.append(contentsOf: registry.doctorChecks(installedPacks: installedPackIDs))
+        // === Layered check collection ===
 
-        // Wrap pack migrations as DoctorCheck adapters
-        for (pack, migration) in registry.migrations(installedPacks: installedPackIDs) {
-            allChecks.append(PackMigrationCheck(migration: migration, packName: pack.displayName))
+        // Layer 1+2: Derived + supplementary checks from installed components
+        let coreComponents = CoreComponents.all
+        let packComponents = registry.availablePacks
+            .filter { installedPackIDs.contains($0.identifier) }
+            .flatMap { $0.components }
+        let allComponents = coreComponents + packComponents
+
+        var allChecks: [any DoctorCheck] = []
+        for component in allComponents {
+            allChecks.append(contentsOf: component.allDoctorChecks())
         }
 
-        // Check that hook contributions are injected
+        // Layer 3: Pack-level supplementary checks (non-component concerns)
+        allChecks.append(contentsOf: registry.supplementaryDoctorChecks(installedPacks: installedPackIDs))
+
+        // Layer 4: Standalone checks (not tied to any component)
+        allChecks.append(contentsOf: standaloneDoctorChecks())
+
+        // Layer 5: Migration/deprecated checks
+        allChecks.append(contentsOf: deprecationChecks())
+        allChecks.append(contentsOf: MigrationDetector.checks)
+
+        // Layer 6: Hook contribution checks
         for (pack, contribution) in registry.hookContributions(installedPacks: installedPackIDs) {
             allChecks.append(HookContributionCheck(
                 packIdentifier: pack.identifier,
@@ -55,11 +118,21 @@ struct DoctorRunner {
             ))
         }
 
+        // Layer 6 (cont.): Pack migrations as DoctorCheck adapters
+        for (pack, migration) in registry.migrations(installedPacks: installedPackIDs) {
+            allChecks.append(PackMigrationCheck(migration: migration, packName: pack.displayName))
+        }
+
+        // Layer 7: Project-scoped checks (only when inside a project)
+        if let root = projectRoot {
+            allChecks.append(contentsOf: ProjectDoctorChecks.checks(projectRoot: root))
+        }
+
         // Group by section
         let grouped = Dictionary(grouping: allChecks, by: \.section)
         let sectionOrder = [
             "Dependencies", "MCP Servers", "Plugins", "Skills", "Commands",
-            "Hooks", "Settings", "Gitignore", "Templates", "Migration",
+            "Hooks", "Settings", "Gitignore", "File Freshness", "Project", "Templates", "Migration",
         ]
 
         for section in sectionOrder {
@@ -76,9 +149,51 @@ struct DoctorRunner {
 
         // Summary
         output.header("Summary")
-        output.plain(
-            "\(passCount) passed  \(fixedCount) fixed  \(warnCount) warnings  \(failCount) issues"
+        output.doctorSummary(
+            passed: passCount,
+            fixed: fixedCount,
+            warnings: warnCount,
+            issues: failCount
         )
+    }
+
+    // MARK: - Standalone checks (not tied to any component)
+
+    /// Checks that cannot be derived from any ComponentDefinition.
+    private func standaloneDoctorChecks() -> [any DoctorCheck] {
+        var checks: [any DoctorCheck] = []
+
+        // Hook event registration in settings.json
+        checks.append(HookEventCheck(eventName: "SessionStart"))
+        checks.append(HookEventCheck(eventName: "UserPromptSubmit", isOptional: true))
+
+        // Continuous learning hook fragment
+        checks.append(ContinuousLearningHookFragmentCheck())
+
+        // Settings value validation
+        checks.append(SettingsCheck())
+        checks.append(SettingsOwnershipCheck())
+
+        // Gitignore (cross-component aggregation)
+        checks.append(GitignoreCheck())
+
+        // Manifest freshness (cross-file integrity)
+        checks.append(ManifestFreshnessCheck())
+
+        return checks
+    }
+
+    /// Deprecated component checks (migration-era artifacts).
+    private func deprecationChecks() -> [any DoctorCheck] {
+        [
+            DeprecatedMCPServerCheck(name: "Serena MCP", identifier: "serena"),
+            DeprecatedMCPServerCheck(name: "mcp-omnisearch", identifier: "mcp-omnisearch"),
+            DeprecatedPluginCheck(name: "claude-hud plugin", pluginName: "claude-hud@claude-hud"),
+            DeprecatedPluginCheck(
+                name: "code-simplifier plugin",
+                pluginName: "code-simplifier@claude-plugins-official"
+            ),
+        ]
     }
 
     // MARK: - Check execution

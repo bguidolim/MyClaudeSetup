@@ -29,11 +29,11 @@ struct IOSTechPack: TechPack {
         ".xcodebuildmcp",
     ]
 
-    var doctorChecks: [any DoctorCheck] {
-        IOSDoctorChecks.all
+    var supplementaryDoctorChecks: [any DoctorCheck] {
+        IOSDoctorChecks.supplementary
     }
 
-    func configureProject(at path: URL, context: ProjectContext) throws {
+    func configureProject(at path: URL, context: ProjectConfigContext) throws {
         let configDir = path.appendingPathComponent(".xcodebuildmcp")
         let configFile = configDir.appendingPathComponent("config.yaml")
 

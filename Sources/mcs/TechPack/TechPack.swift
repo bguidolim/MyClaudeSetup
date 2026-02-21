@@ -1,7 +1,7 @@
 import Foundation
 
 /// Context provided to tech packs during project configuration
-struct ProjectContext: Sendable {
+struct ProjectConfigContext: Sendable {
     let projectPath: URL
     let branchPrefix: String
     let repoName: String
@@ -37,10 +37,12 @@ protocol TechPack: Sendable {
     var templates: [TemplateContribution] { get }
     var hookContributions: [HookContribution] { get }
     var gitignoreEntries: [String] { get }
-    var doctorChecks: [any DoctorCheck] { get }
+    /// Doctor checks that cannot be auto-derived from components.
+    /// For pack-level or project-level concerns (e.g. Xcode CLT, config files).
+    var supplementaryDoctorChecks: [any DoctorCheck] { get }
     var migrations: [any PackMigration] { get }
 
-    func configureProject(at path: URL, context: ProjectContext) throws
+    func configureProject(at path: URL, context: ProjectConfigContext) throws
 }
 
 extension TechPack {

@@ -11,6 +11,11 @@ enum ComponentType: String, Sendable, CaseIterable {
     case configuration = "Configurations"
 }
 
+extension ComponentType {
+    /// Maps component types to doctor check section headers.
+    var doctorSection: String { rawValue }
+}
+
 /// Definition of an installable component
 struct ComponentDefinition: Sendable, Identifiable {
     let id: String // Unique identifier, e.g., "core.docs-mcp-server"
@@ -21,6 +26,32 @@ struct ComponentDefinition: Sendable, Identifiable {
     let dependencies: [String] // IDs of components this depends on
     let isRequired: Bool // If true, always installed with its pack/core
     let installAction: ComponentInstallAction
+
+    /// Additional doctor checks that cannot be auto-derived from installAction.
+    /// Used for components with .shellCommand or multi-step verification needs.
+    let supplementaryChecks: [any DoctorCheck]
+
+    init(
+        id: String,
+        displayName: String,
+        description: String,
+        type: ComponentType,
+        packIdentifier: String?,
+        dependencies: [String],
+        isRequired: Bool,
+        installAction: ComponentInstallAction,
+        supplementaryChecks: [any DoctorCheck] = []
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.description = description
+        self.type = type
+        self.packIdentifier = packIdentifier
+        self.dependencies = dependencies
+        self.isRequired = isRequired
+        self.installAction = installAction
+        self.supplementaryChecks = supplementaryChecks
+    }
 }
 
 /// How to install a component

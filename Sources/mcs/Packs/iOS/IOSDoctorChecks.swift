@@ -2,6 +2,19 @@ import Foundation
 
 /// Doctor checks specific to the iOS tech pack.
 enum IOSDoctorChecks {
+    /// Pack-level checks that cannot be auto-derived from components.
+    /// XcodeBuildMCPServerCheck and SosumiServerCheck are now auto-derived
+    /// from their component definitions. XcodeBuildMCPSkillCheck is a
+    /// supplementaryCheck on the ios.skill.xcodebuildmcp component.
+    static var supplementary: [any DoctorCheck] {
+        [
+            XcodeCLTCheck(),
+            XcodeBuildMCPConfigCheck(),
+            CLAUDELocalIOSSectionCheck(),
+        ]
+    }
+
+    /// All iOS checks including auto-derived ones. Kept for testing.
     static var all: [any DoctorCheck] {
         [
             XcodeCLTCheck(),

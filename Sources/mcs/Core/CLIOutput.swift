@@ -68,6 +68,16 @@ struct CLIOutput: Sendable {
         write("  \(dim)\(divider)\(reset)\n")
     }
 
+    /// Colored doctor summary line.
+    func doctorSummary(passed: Int, fixed: Int, warnings: Int, issues: Int) {
+        var parts: [String] = []
+        parts.append("\(blue)\(passed) passed\(reset)")
+        parts.append("\(green)\(fixed) fixed\(reset)")
+        parts.append("\(yellow)\(warnings) warnings\(reset)")
+        parts.append("\(red)\(issues) issues\(reset)")
+        write(parts.joined(separator: "  ") + "\n")
+    }
+
     // MARK: - Prompts
 
     /// Ask a yes/no question. Returns true for yes, false for no.

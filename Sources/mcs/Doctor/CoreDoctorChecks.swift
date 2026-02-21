@@ -1,96 +1,5 @@
 import Foundation
 
-// MARK: - Core checks factory
-
-extension DoctorRunner {
-    func coreDoctorChecks() -> [any DoctorCheck] {
-        var checks: [any DoctorCheck] = []
-
-        // Dependencies
-        checks.append(CommandCheck(
-            name: "Homebrew", section: "Dependencies", command: "brew", fixAction: nil
-        ))
-        checks.append(CommandCheck(
-            name: "Node.js", section: "Dependencies", command: "node",
-            fixAction: "brew install node"
-        ))
-        checks.append(CommandCheck(
-            name: "jq", section: "Dependencies", command: "jq",
-            fixAction: "brew install jq"
-        ))
-        checks.append(CommandCheck(
-            name: "Claude Code", section: "Dependencies", command: "claude", fixAction: nil
-        ))
-        checks.append(CommandCheck(
-            name: "GitHub CLI", section: "Dependencies", command: "gh",
-            fixAction: "brew install gh", isOptional: true
-        ))
-        checks.append(OllamaCheck())
-
-        // MCP Servers
-        checks.append(MCPServerCheck(name: "docs-mcp-server", serverName: "docs-mcp-server"))
-
-        // Plugins
-        for pluginName in [
-            "explanatory-output-style@claude-plugins-official",
-            "pr-review-toolkit@claude-plugins-official",
-            "ralph-loop@claude-plugins-official",
-            "claude-md-management@claude-plugins-official",
-        ] {
-            checks.append(PluginCheck(pluginName: pluginName))
-        }
-
-        // Skills
-        let env = Environment()
-        checks.append(FileExistsCheck(
-            name: "continuous-learning skill",
-            section: "Skills",
-            path: env.skillsDirectory.appendingPathComponent("continuous-learning/SKILL.md")
-        ))
-
-        // Commands
-        checks.append(CommandFileCheck(
-            name: "/pr command",
-            path: env.commandsDirectory.appendingPathComponent("pr.md")
-        ))
-
-        // Hooks
-        checks.append(HookCheck(hookName: "session_start.sh"))
-        checks.append(HookCheck(hookName: "continuous-learning-activator.sh", isOptional: true))
-        checks.append(HookEventCheck(eventName: "SessionStart"))
-        checks.append(HookEventCheck(eventName: "UserPromptSubmit", isOptional: true))
-        checks.append(ContinuousLearningHookFragmentCheck())
-
-        // Settings
-        checks.append(SettingsCheck())
-        checks.append(SettingsOwnershipCheck())
-
-        // Gitignore
-        checks.append(GitignoreCheck())
-
-        // File Freshness
-        checks.append(ManifestFreshnessCheck())
-
-        // Migration (includes deprecated components + migration detectors)
-        checks.append(DeprecatedMCPServerCheck(
-            name: "Serena MCP", identifier: "serena"
-        ))
-        checks.append(DeprecatedMCPServerCheck(
-            name: "mcp-omnisearch", identifier: "mcp-omnisearch"
-        ))
-        checks.append(DeprecatedPluginCheck(
-            name: "claude-hud plugin", pluginName: "claude-hud@claude-hud"
-        ))
-        checks.append(DeprecatedPluginCheck(
-            name: "code-simplifier plugin",
-            pluginName: "code-simplifier@claude-plugins-official"
-        ))
-        checks.append(contentsOf: MigrationDetector.checks)
-
-        return checks
-    }
-}
-
 // MARK: - Check implementations
 
 struct CommandCheck: DoctorCheck, Sendable {
@@ -121,8 +30,11 @@ struct CommandCheck: DoctorCheck, Sendable {
     }
 }
 
-struct OllamaCheck: DoctorCheck, Sendable {
-    var name: String { "Ollama" }
+/// Supplementary check for Ollama's daemon and model state.
+/// Used as a supplementaryCheck on the core.ollama component.
+/// Binary existence is handled by the auto-derived CommandCheck.
+struct OllamaRuntimeCheck: DoctorCheck, Sendable {
+    var name: String { "Ollama runtime" }
     var section: String { "Dependencies" }
 
     func check() -> CheckResult {
@@ -131,13 +43,13 @@ struct OllamaCheck: DoctorCheck, Sendable {
         let ollama = OllamaService(shell: shell, environment: env)
 
         guard shell.commandExists("ollama") else {
-            return .fail("not installed")
+            return .skip("ollama not installed")
         }
         guard ollama.isRunning() else {
-            return .fail("installed but not running")
+            return .warn("not running — start with 'ollama serve' or open the Ollama app")
         }
         guard ollama.hasEmbeddingModel() else {
-            return .fail("running but nomic-embed-text model not installed")
+            return .warn("running but nomic-embed-text model not installed — run 'ollama pull nomic-embed-text'")
         }
         return .pass("running with nomic-embed-text")
     }
@@ -148,7 +60,7 @@ struct OllamaCheck: DoctorCheck, Sendable {
         let ollama = OllamaService(shell: shell, environment: env)
 
         guard shell.commandExists("ollama") else {
-            return .notFixable("Install Ollama via 'brew install ollama' or https://ollama.com/download")
+            return .notFixable("Install Ollama first")
         }
 
         guard ollama.start() else {
@@ -159,8 +71,8 @@ struct OllamaCheck: DoctorCheck, Sendable {
             return .failed("Could not pull nomic-embed-text: \(result.stderr)")
         }
 
-        let verifyResult = check()
-        if case .pass = verifyResult {
+        // Verify the fix actually worked
+        if case .pass = check() {
             return .fixed("Ollama running with nomic-embed-text")
         }
         return .failed("Ollama fix attempted but verification failed")
