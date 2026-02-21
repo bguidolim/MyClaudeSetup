@@ -10,6 +10,7 @@ struct GitignoreManager: Sendable {
         Constants.FileNames.claudeDirectory,
         "*.local.*",
         "\(Constants.FileNames.claudeDirectory)/memories/",
+        "\(Constants.FileNames.claudeDirectory)/\(Constants.FileNames.mcsProject)",
     ]
 
     /// Resolve the global gitignore file path.

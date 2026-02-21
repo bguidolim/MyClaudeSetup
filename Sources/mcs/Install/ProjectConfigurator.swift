@@ -82,8 +82,8 @@ struct ProjectConfigurator {
         // Memory migration from Serena
         migrateSerenaMemories(at: projectPath)
 
-        // Add .claude entries to project .gitignore
-        try updateProjectGitignore(at: projectPath)
+        // Ensure .claude entries exist in user's global gitignore
+        try ensureGitignoreEntries()
 
         // Run pack-specific configuration
         let context = ProjectConfigContext(
@@ -257,24 +257,8 @@ struct ProjectConfigurator {
 
     // MARK: - Gitignore
 
-    private func updateProjectGitignore(at projectPath: URL) throws {
-        let fm = FileManager.default
-        let projectGitignore = projectPath.appendingPathComponent(".gitignore")
-
-        guard fm.fileExists(atPath: projectGitignore.path) else { return }
-
-        var content = try String(contentsOf: projectGitignore, encoding: .utf8)
-        var added: [String] = []
-        for entry in ["\(Constants.FileNames.claudeDirectory)/memories/", "\(Constants.FileNames.claudeDirectory)/\(Constants.FileNames.mcsProject)"] {
-            if !content.contains(entry) {
-                if !content.hasSuffix("\n") { content += "\n" }
-                content += "\(entry)\n"
-                added.append(entry)
-            }
-        }
-        if !added.isEmpty {
-            try content.write(to: projectGitignore, atomically: true, encoding: .utf8)
-            output.success("Added \(added.joined(separator: ", ")) to project .gitignore")
-        }
+    private func ensureGitignoreEntries() throws {
+        let manager = GitignoreManager(shell: shell)
+        try manager.addCoreEntries()
     }
 }
