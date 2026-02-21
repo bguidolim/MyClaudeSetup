@@ -35,7 +35,7 @@ struct ClaudeIntegration: Sendable {
     func mcpRemove(name: String, scope: String = "user") -> ShellResult {
         shell.run(
             Constants.CLI.env,
-            arguments: ["claude", "mcp", "remove", "-s", scope, name],
+            arguments: [Constants.CLI.claudeCommand, "mcp", "remove", "-s", scope, name],
             additionalEnvironment: claudeEnv
         )
     }
@@ -47,7 +47,7 @@ struct ClaudeIntegration: Sendable {
     func pluginMarketplaceAdd(repo: String) -> ShellResult {
         shell.run(
             Constants.CLI.env,
-            arguments: ["claude", "plugin", "marketplace", "add", repo],
+            arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "add", repo],
             additionalEnvironment: claudeEnv
         )
     }
@@ -72,7 +72,7 @@ struct ClaudeIntegration: Sendable {
 
         return shell.run(
             Constants.CLI.env,
-            arguments: ["claude", "plugin", "install", fullName],
+            arguments: [Constants.CLI.claudeCommand, "plugin", "install", fullName],
             additionalEnvironment: claudeEnv
         )
     }
@@ -82,7 +82,7 @@ struct ClaudeIntegration: Sendable {
     func pluginRemove(fullName: String) -> ShellResult {
         shell.run(
             Constants.CLI.env,
-            arguments: ["claude", "plugin", "remove", fullName],
+            arguments: [Constants.CLI.claudeCommand, "plugin", "remove", fullName],
             additionalEnvironment: claudeEnv
         )
     }

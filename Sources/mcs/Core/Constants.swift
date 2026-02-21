@@ -1,6 +1,8 @@
 /// Centralized string constants used across multiple files.
-/// Only strings that appear in 2+ files belong here.
-/// Single-file constants should remain local to their type.
+/// Only strings that appear in 2+ files belong here; single-use
+/// constants may be included when they form a logical group with
+/// multi-use siblings. Single-file constants should remain local
+/// to their type.
 enum Constants {
 
     // MARK: - File Names
@@ -39,7 +41,7 @@ enum Constants {
         static let embeddingModel = "nomic-embed-text"
 
         /// The embedding model ID in OpenAI-compatible format.
-        static let embeddingModelID = "openai:nomic-embed-text"
+        static var embeddingModelID: String { "openai:\(embeddingModel)" }
 
         /// The local Ollama API base URL (OpenAI-compatible endpoint).
         static let apiBase = "http://localhost:11434/v1"
