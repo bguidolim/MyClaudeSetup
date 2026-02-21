@@ -26,24 +26,24 @@ struct TechPackRegistryTests {
 
     // MARK: - Filtered by installed packs
 
-    @Test("doctorChecks returns empty when no packs installed")
-    func doctorChecksEmpty() {
-        let checks = TechPackRegistry.shared.doctorChecks(installedPacks: [])
+    @Test("supplementaryDoctorChecks returns empty when no packs installed")
+    func supplementaryDoctorChecksEmpty() {
+        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: [])
         #expect(checks.isEmpty)
     }
 
-    @Test("doctorChecks returns iOS checks when iOS pack is installed")
-    func doctorChecksWithIOS() {
-        let checks = TechPackRegistry.shared.doctorChecks(installedPacks: ["ios"])
+    @Test("supplementaryDoctorChecks returns iOS checks when iOS pack is installed")
+    func supplementaryDoctorChecksWithIOS() {
+        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: ["ios"])
         #expect(!checks.isEmpty)
         // iOS pack should contribute checks like XcodeBuildMCP, Sosumi, etc.
         let names = checks.map(\.name)
         #expect(names.contains(where: { $0.lowercased().contains("xcode") || $0.lowercased().contains("sosumi") || $0.lowercased().contains("config") }))
     }
 
-    @Test("doctorChecks ignores unrecognized pack identifiers")
-    func doctorChecksUnknownPack() {
-        let checks = TechPackRegistry.shared.doctorChecks(installedPacks: ["nonexistent"])
+    @Test("supplementaryDoctorChecks ignores unrecognized pack identifiers")
+    func supplementaryDoctorChecksUnknownPack() {
+        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: ["nonexistent"])
         #expect(checks.isEmpty)
     }
 

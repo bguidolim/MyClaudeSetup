@@ -35,10 +35,11 @@ struct TechPackRegistry: Sendable {
         return packs.filter { ids.contains($0.identifier) }
     }
 
-    /// Get doctor checks only for installed packs.
-    func doctorChecks(installedPacks ids: Set<String>) -> [any DoctorCheck] {
+    /// Get supplementary doctor checks only for installed packs.
+    /// These are pack-level checks that cannot be auto-derived from components.
+    func supplementaryDoctorChecks(installedPacks ids: Set<String>) -> [any DoctorCheck] {
         packs.filter { ids.contains($0.identifier) }
-            .flatMap { $0.doctorChecks }
+            .flatMap { $0.supplementaryDoctorChecks }
     }
 
     /// Get hook contributions only for installed packs.

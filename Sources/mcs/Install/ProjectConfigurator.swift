@@ -198,25 +198,41 @@ struct ProjectConfigurator {
             output.info("Original files preserved in .serena/memories/ -- delete manually after verification")
         }
 
-        // Add .claude/memories/ to project .gitignore
+        // Add .claude entries to project .gitignore
         let projectGitignore = projectPath.appendingPathComponent(".gitignore")
         if fm.fileExists(atPath: projectGitignore.path) {
             var content = try String(contentsOf: projectGitignore, encoding: .utf8)
-            if !content.contains(".claude/memories/") {
-                if !content.hasSuffix("\n") { content += "\n" }
-                content += ".claude/memories/\n"
+            var added: [String] = []
+            for entry in [".claude/memories/", ".claude/.mcs-project"] {
+                if !content.contains(entry) {
+                    if !content.hasSuffix("\n") { content += "\n" }
+                    content += "\(entry)\n"
+                    added.append(entry)
+                }
+            }
+            if !added.isEmpty {
                 try content.write(to: projectGitignore, atomically: true, encoding: .utf8)
-                output.success("Added .claude/memories/ to project .gitignore")
+                output.success("Added \(added.joined(separator: ", ")) to project .gitignore")
             }
         }
 
         // Run pack-specific configuration
-        let context = ProjectContext(
+        let context = ProjectConfigContext(
             projectPath: projectPath,
             branchPrefix: branchPrefix,
             repoName: repoName
         )
         try pack.configureProject(at: projectPath, context: context)
         output.success("Applied \(pack.displayName) configuration")
+
+        // Write per-project state file
+        var projectState = ProjectState(projectRoot: projectPath)
+        projectState.recordPack(pack.identifier)
+        do {
+            try projectState.save()
+            output.success("Updated .claude/.mcs-project")
+        } catch {
+            output.warn("Could not write .mcs-project: \(error.localizedDescription)")
+        }
     }
 }

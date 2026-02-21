@@ -32,7 +32,10 @@ enum CoreComponents {
         isRequired: false,
         installAction: .shellCommand(
             command: "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-        )
+        ),
+        supplementaryChecks: [
+            CommandCheck(name: "Homebrew", section: "Dependencies", command: "brew", fixAction: nil),
+        ]
     )
 
     static let node = ComponentDefinition(
@@ -76,7 +79,8 @@ enum CoreComponents {
         packIdentifier: nil,
         dependencies: ["core.homebrew"],
         isRequired: false,
-        installAction: .brewInstall(package: "ollama")
+        installAction: .brewInstall(package: "ollama"),
+        supplementaryChecks: [OllamaRuntimeCheck()]
     )
 
     static let claudeCode = ComponentDefinition(
@@ -87,7 +91,10 @@ enum CoreComponents {
         packIdentifier: nil,
         dependencies: ["core.homebrew"],
         isRequired: false,
-        installAction: .shellCommand(command: "brew install --cask claude-code")
+        installAction: .shellCommand(command: "brew install --cask claude-code"),
+        supplementaryChecks: [
+            CommandCheck(name: "Claude Code", section: "Dependencies", command: "claude", fixAction: nil),
+        ]
     )
 
     // MARK: - MCP Servers

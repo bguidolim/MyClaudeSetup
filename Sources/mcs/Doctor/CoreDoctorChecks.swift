@@ -1,95 +1,9 @@
 import Foundation
 
-// MARK: - Core checks factory
-
-extension DoctorRunner {
-    func coreDoctorChecks() -> [any DoctorCheck] {
-        var checks: [any DoctorCheck] = []
-
-        // Dependencies
-        checks.append(CommandCheck(
-            name: "Homebrew", section: "Dependencies", command: "brew", fixAction: nil
-        ))
-        checks.append(CommandCheck(
-            name: "Node.js", section: "Dependencies", command: "node",
-            fixAction: "brew install node"
-        ))
-        checks.append(CommandCheck(
-            name: "jq", section: "Dependencies", command: "jq",
-            fixAction: "brew install jq"
-        ))
-        checks.append(CommandCheck(
-            name: "Claude Code", section: "Dependencies", command: "claude", fixAction: nil
-        ))
-        checks.append(CommandCheck(
-            name: "GitHub CLI", section: "Dependencies", command: "gh",
-            fixAction: "brew install gh", isOptional: true
-        ))
-        checks.append(OllamaCheck())
-
-        // MCP Servers
-        checks.append(MCPServerCheck(name: "docs-mcp-server", serverName: "docs-mcp-server"))
-
-        // Plugins
-        for pluginName in [
-            "explanatory-output-style@claude-plugins-official",
-            "pr-review-toolkit@claude-plugins-official",
-            "ralph-loop@claude-plugins-official",
-            "claude-md-management@claude-plugins-official",
-        ] {
-            checks.append(PluginCheck(pluginName: pluginName))
-        }
-
-        // Skills
-        let env = Environment()
-        checks.append(FileExistsCheck(
-            name: "continuous-learning skill",
-            section: "Skills",
-            path: env.skillsDirectory.appendingPathComponent("continuous-learning/SKILL.md")
-        ))
-
-        // Commands
-        checks.append(CommandFileCheck(
-            name: "/pr command",
-            path: env.commandsDirectory.appendingPathComponent("pr.md")
-        ))
-
-        // Hooks
-        checks.append(HookCheck(hookName: "session_start.sh"))
-        checks.append(HookCheck(hookName: "continuous-learning-activator.sh", isOptional: true))
-        checks.append(HookEventCheck(eventName: "SessionStart"))
-        checks.append(HookEventCheck(eventName: "UserPromptSubmit", isOptional: true))
-        checks.append(ContinuousLearningHookFragmentCheck())
-
-        // Settings
-        checks.append(SettingsCheck())
-        checks.append(SettingsOwnershipCheck())
-
-        // Gitignore
-        checks.append(GitignoreCheck())
-
-        // File Freshness
-        checks.append(ManifestFreshnessCheck())
-
-        // Migration (includes deprecated components + migration detectors)
-        checks.append(DeprecatedMCPServerCheck(
-            name: "Serena MCP", identifier: "serena"
-        ))
-        checks.append(DeprecatedMCPServerCheck(
-            name: "mcp-omnisearch", identifier: "mcp-omnisearch"
-        ))
-        checks.append(DeprecatedPluginCheck(
-            name: "claude-hud plugin", pluginName: "claude-hud@claude-hud"
-        ))
-        checks.append(DeprecatedPluginCheck(
-            name: "code-simplifier plugin",
-            pluginName: "code-simplifier@claude-plugins-official"
-        ))
-        checks.append(contentsOf: MigrationDetector.checks)
-
-        return checks
-    }
-}
+// The coreDoctorChecks() factory has been replaced by component-derived checks.
+// Doctor checks are now auto-derived from ComponentDefinition.installAction
+// (see DerivedDoctorChecks.swift), with supplementary checks attached to
+// individual components, and standalone checks in DoctorRunner.standaloneDoctorChecks().
 
 // MARK: - Check implementations
 
@@ -121,6 +35,10 @@ struct CommandCheck: DoctorCheck, Sendable {
     }
 }
 
+/// Checks that Ollama is installed, running, and has the embedding model.
+/// Legacy check — used by standaloneDoctorChecks(). For the derived-checks
+/// architecture, binary existence is auto-derived from .brewInstall("ollama")
+/// and OllamaRuntimeCheck handles daemon + model.
 struct OllamaCheck: DoctorCheck, Sendable {
     var name: String { "Ollama" }
     var section: String { "Dependencies" }
@@ -164,6 +82,51 @@ struct OllamaCheck: DoctorCheck, Sendable {
             return .fixed("Ollama running with nomic-embed-text")
         }
         return .failed("Ollama fix attempted but verification failed")
+    }
+}
+
+/// Supplementary check for Ollama's daemon and model state.
+/// Used as a supplementaryCheck on the core.ollama component.
+/// Binary existence is handled by the auto-derived CommandCheck.
+struct OllamaRuntimeCheck: DoctorCheck, Sendable {
+    var name: String { "Ollama runtime" }
+    var section: String { "Dependencies" }
+
+    func check() -> CheckResult {
+        let env = Environment()
+        let shell = ShellRunner(environment: env)
+        let ollama = OllamaService(shell: shell, environment: env)
+
+        guard shell.commandExists("ollama") else {
+            return .skip("ollama not installed")
+        }
+        guard ollama.isRunning() else {
+            return .warn("not running — start with 'ollama serve' or open the Ollama app")
+        }
+        guard ollama.hasEmbeddingModel() else {
+            return .warn("running but nomic-embed-text model not installed — run 'ollama pull nomic-embed-text'")
+        }
+        return .pass("running with nomic-embed-text")
+    }
+
+    func fix() -> FixResult {
+        let env = Environment()
+        let shell = ShellRunner(environment: env)
+        let ollama = OllamaService(shell: shell, environment: env)
+
+        guard shell.commandExists("ollama") else {
+            return .notFixable("Install Ollama first")
+        }
+
+        guard ollama.start() else {
+            return .failed("Ollama did not start — try 'ollama serve' or open the Ollama app manually")
+        }
+
+        if let result = ollama.pullEmbeddingModelIfNeeded(), !result.succeeded {
+            return .failed("Could not pull nomic-embed-text: \(result.stderr)")
+        }
+
+        return .fixed("Ollama running with nomic-embed-text")
     }
 }
 

@@ -39,7 +39,8 @@ enum IOSComponents {
         isRequired: false,
         installAction: .shellCommand(
             command: "npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y"
-        )
+        ),
+        supplementaryChecks: [XcodeBuildMCPSkillCheck()]
     )
 
     static let gitignore = ComponentDefinition(

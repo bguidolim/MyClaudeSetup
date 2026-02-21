@@ -557,7 +557,19 @@ struct Installer {
                 try fm.copyItem(at: file, to: destFile)
             }
 
-            recordManifest(&manifest, relativePath: source, sourceFile: sourceURL)
+            // Record per-file hashes instead of per-directory
+            // (directories can't be hashed by Data(contentsOf:))
+            do {
+                let fileHashes = try Manifest.directoryFileHashes(at: sourceURL)
+                for entry in fileHashes {
+                    manifest.recordHash(
+                        relativePath: "\(source)/\(entry.relativePath)",
+                        hash: entry.hash
+                    )
+                }
+            } catch {
+                output.warn("Could not record manifest hashes for \(source): \(error.localizedDescription)")
+            }
             return true
         } catch {
             output.warn(error.localizedDescription)
@@ -757,70 +769,28 @@ struct Installer {
     // MARK: - Already-installed detection
 
     /// Check if a component is already installed.
-    /// Uses the same detection logic as the doctor checks to stay consistent.
+    /// Delegates to the same derived + supplementary doctor checks used by `mcs doctor`,
+    /// ensuring install and doctor always use the same detection logic.
     private func isAlreadyInstalled(_ component: ComponentDefinition) -> Bool {
-        let fm = FileManager.default
-
+        // Idempotent actions: always re-run
         switch component.installAction {
-        case .brewInstall(let package):
-            // Check PATH first — handles non-Homebrew installs (e.g. Ollama macOS app,
-            // Node via nvm, jq via nix). Only fall back to brew list if not on PATH.
-            if shell.commandExists(package) { return true }
-            return Homebrew(shell: shell, environment: environment).isPackageInstalled(package)
-
-        case .mcpServer(let config):
-            // Same check as MCPServerCheck in doctor
-            guard fm.fileExists(atPath: environment.claudeJSON.path) else { return false }
-            do {
-                let data = try Data(contentsOf: environment.claudeJSON)
-                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let servers = json?["mcpServers"] as? [String: Any]
-                return servers?[config.name] != nil
-            } catch {
-                output.warn("Could not read ~/.claude.json: \(error.localizedDescription)")
-                return false
-            }
-
-        case .plugin(let name):
-            // Same check as PluginCheck in doctor — look at settings.json
-            guard fm.fileExists(atPath: environment.claudeSettings.path) else { return false }
-            do {
-                let settings = try Settings.load(from: environment.claudeSettings)
-                return settings.enabledPlugins?[name] == true
-            } catch {
-                output.warn("Could not read settings.json: \(error.localizedDescription)")
-                return false
-            }
-
-        case .copySkill(_, let destination):
-            let dest = environment.skillsDirectory.appendingPathComponent(destination)
-            return fm.fileExists(atPath: dest.path)
-
-        case .copyHook(_, let destination):
-            let dest = environment.hooksDirectory.appendingPathComponent(destination)
-            return fm.fileExists(atPath: dest.path)
-
-        case .copyCommand(_, let destination, _):
-            let dest = environment.commandsDirectory.appendingPathComponent(destination)
-            return fm.fileExists(atPath: dest.path)
-
-        case .settingsMerge:
-            return false // Always run merge to pick up new settings
-
-        case .gitignoreEntries:
-            return false // Idempotent, safe to re-run
-
-        case .shellCommand:
-            // Check known components by their expected command on PATH
-            switch component.id {
-            case "core.homebrew":
-                return Homebrew(shell: shell, environment: environment).isInstalled
-            case "core.claude-code":
-                return shell.commandExists("claude")
-            default:
-                return false
-            }
+        case .settingsMerge, .gitignoreEntries:
+            return false
+        default:
+            break
         }
+
+        // Try derived check (auto-generated from installAction)
+        if let check = component.deriveDoctorCheck() {
+            if case .pass = check.check() { return true }
+        }
+
+        // Try supplementary checks (component-specific extras)
+        for check in component.supplementaryChecks {
+            if case .pass = check.check() { return true }
+        }
+
+        return false
     }
 
     // MARK: - Continuous Learning Post-Processing
