@@ -9,7 +9,7 @@
 
 `mcs` installs and manages MCP servers, semantic memory, PR automation agents, session hooks, and stack-specific tooling — turning Claude Code into a persistent, context-aware AI development environment.
 
-Built for developers who want:
+**Built for developers who want:**
 
 - Semantic project memory (local embeddings via Ollama)
 - Automated PR reviews and commit workflows
@@ -20,8 +20,6 @@ Built for developers who want:
 ```bash
 brew install bguidolim/tap/my-claude-setup && mcs install --all
 ```
-
-Install once. Reproduce anywhere.
 
 ---
 
