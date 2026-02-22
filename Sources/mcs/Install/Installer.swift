@@ -307,18 +307,17 @@ struct Installer {
             manifest.recordInstalledPack(packID)
         }
 
-        // Save manifest
-        do {
-            try manifest.save()
-        } catch {
-            output.warn("Could not save manifest: \(error.localizedDescription)")
-        }
-
-        // Post-processing: inject pack hook contributions and gitignore entries
+        // Post-processing: inject pack hook contributions and gitignore entries.
+        // These run BEFORE manifest save so that hook file hashes can be
+        // re-recorded after injection modifies the installed files.
+        var modifiedHookFiles: Set<String> = []
         for packID in installedPackIDs {
             if let pack = TechPackRegistry.shared.pack(for: packID) {
                 injectHookContributions(from: pack)
                 addPackGitignoreEntries(from: pack)
+                for contribution in pack.hookContributions {
+                    modifiedHookFiles.insert(contribution.hookName + ".sh")
+                }
             }
         }
 
@@ -326,6 +325,30 @@ struct Installer {
         if state.isSelected("core.docs-mcp-server") {
             injectContinuousLearningHook()
             registerContinuousLearningSettings()
+            modifiedHookFiles.insert(Constants.FileNames.sessionStartHook)
+        }
+
+        // Re-record hashes for hook files modified by post-processing injections.
+        // Without this, the manifest would contain the pre-injection source hash,
+        // causing doctor freshness checks to report drift on every run.
+        for hookFileName in modifiedHookFiles {
+            let installedHook = environment.hooksDirectory.appendingPathComponent(hookFileName)
+            let relativePath = "hooks/\(hookFileName)"
+            if FileManager.default.fileExists(atPath: installedHook.path) {
+                do {
+                    let hash = try Manifest.sha256(of: installedHook)
+                    manifest.recordHash(relativePath: relativePath, hash: hash)
+                } catch {
+                    output.warn("Could not update manifest hash for \(hookFileName): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Save manifest after all post-processing to capture final state
+        do {
+            try manifest.save()
+        } catch {
+            output.warn("Could not save manifest: \(error.localizedDescription)")
         }
     }
 
