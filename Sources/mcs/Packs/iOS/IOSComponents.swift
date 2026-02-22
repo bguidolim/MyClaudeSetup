@@ -43,6 +43,20 @@ enum IOSComponents {
         supplementaryChecks: [XcodeBuildMCPSkillCheck()]
     )
 
+    static let swiftCodeReviewerSkill = ComponentDefinition(
+        id: "ios.skill.swift-code-reviewer",
+        displayName: "Swift Code Reviewer skill",
+        description: "Multi-layer code review for Swift and SwiftUI with quality, performance, and security analysis",
+        type: .skill,
+        packIdentifier: "ios",
+        dependencies: [],
+        isRequired: false,
+        installAction: .shellCommand(
+            command: "npx -y skills add Viniciuscarvalho/swift-code-reviewer-skill -g -a claude-code -y"
+        ),
+        supplementaryChecks: [SwiftCodeReviewerSkillCheck()]
+    )
+
     static let gitignore = ComponentDefinition(
         id: "ios.gitignore",
         displayName: "iOS gitignore entries",
@@ -58,6 +72,7 @@ enum IOSComponents {
         xcodeBuildMCP,
         sosumi,
         xcodeBuildMCPSkill,
+        swiftCodeReviewerSkill,
         gitignore,
     ]
 }
