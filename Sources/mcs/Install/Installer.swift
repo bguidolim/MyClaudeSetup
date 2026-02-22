@@ -394,6 +394,15 @@ struct Installer {
 
     // MARK: - Component Installation
 
+    private var executor: ComponentExecutor {
+        ComponentExecutor(
+            environment: environment,
+            output: output,
+            shell: shell,
+            backup: backup
+        )
+    }
+
     private mutating func installComponent(
         _ component: ComponentDefinition,
         state: SelectionState,
@@ -401,9 +410,9 @@ struct Installer {
     ) -> Bool {
         switch component.installAction {
         case .brewInstall(let package):
-            let success = installBrewPackage(package)
+            let success = executor.installBrewPackage(package)
             if success {
-                postInstall(component)
+                executor.postInstall(component)
             }
             return success
 
@@ -415,10 +424,10 @@ struct Installer {
             return result.succeeded
 
         case .mcpServer(let config):
-            return installMCPServer(config)
+            return executor.installMCPServer(config)
 
         case .plugin(let name):
-            return installPlugin(name)
+            return executor.installPlugin(name)
 
         case .copySkill(let source, let destination):
             return copySkill(source: source, destination: destination, manifest: &manifest)
@@ -439,63 +448,8 @@ struct Installer {
             return mergeSettings()
 
         case .gitignoreEntries(let entries):
-            return addGitignoreEntries(entries)
+            return executor.addGitignoreEntries(entries)
         }
-    }
-
-    private func installBrewPackage(_ package: String) -> Bool {
-        // Already available (installed via any method — Homebrew, macOS app, nvm, etc.)
-        if shell.commandExists(package) {
-            return true
-        }
-        let brew = Homebrew(shell: shell, environment: environment)
-        guard brew.isInstalled else {
-            output.warn("Homebrew not found, cannot install \(package)")
-            return false
-        }
-        if brew.isPackageInstalled(package) {
-            return true
-        }
-        let result = brew.install(package)
-        if !result.succeeded {
-            output.warn(String(result.stderr.prefix(200)))
-        }
-        return result.succeeded
-    }
-
-    private func installMCPServer(_ config: MCPServerConfig) -> Bool {
-        guard shell.commandExists(Constants.CLI.claudeCommand) else {
-            output.warn("Claude Code CLI not found, skipping MCP server")
-            return false
-        }
-        let claude = ClaudeIntegration(shell: shell)
-
-        // Build arguments
-        var args: [String] = []
-        for (key, value) in config.env.sorted(by: { $0.key < $1.key }) {
-            args.append(contentsOf: ["-e", "\(key)=\(value)"])
-        }
-        if config.command == "http" {
-            args.append(contentsOf: ["--transport", "http"])
-            args.append(contentsOf: config.args)
-        } else {
-            args.append("--")
-            args.append(config.command)
-            args.append(contentsOf: config.args)
-        }
-
-        let result = claude.mcpAdd(name: config.name, arguments: args)
-        return result.succeeded
-    }
-
-    private func installPlugin(_ fullName: String) -> Bool {
-        guard shell.commandExists(Constants.CLI.claudeCommand) else {
-            output.warn("Claude Code CLI not found, skipping plugin")
-            return false
-        }
-        let claude = ClaudeIntegration(shell: shell)
-        let result = claude.pluginInstall(fullName: fullName)
-        return result.succeeded
     }
 
     /// Resolve a bundled resource path relative to Resources/.
@@ -702,100 +656,20 @@ struct Installer {
         }
     }
 
-    /// Run post-install steps for specific components (e.g., start services, pull models).
-    private func postInstall(_ component: ComponentDefinition) {
-        switch component.id {
-        case "core.ollama":
-            let ollama = OllamaService(shell: shell, environment: environment)
-            if ollama.isRunning() {
-                output.dimmed("Ollama already running")
-            } else {
-                output.dimmed("Starting Ollama...")
-                if !ollama.start() {
-                    output.warn("Could not start Ollama automatically.")
-                    output.warn("Start it manually with 'ollama serve' or open the Ollama app, then re-run.")
-                }
-            }
-            output.dimmed("Pulling \(Constants.Ollama.embeddingModel) model...")
-            if let result = ollama.pullEmbeddingModelIfNeeded(), !result.succeeded {
-                output.warn("Could not pull \(Constants.Ollama.embeddingModel): \(result.stderr)")
-            }
-        default:
-            break
-        }
-    }
-
-    private func addGitignoreEntries(_ entries: [String]) -> Bool {
-        let manager = GitignoreManager(shell: shell)
-        do {
-            for entry in entries {
-                try manager.addEntry(entry)
-            }
-            return true
-        } catch {
-            output.dimmed(error.localizedDescription)
-            return false
-        }
-    }
-
     // MARK: - Pack Post-Processing
 
-    /// Inject a pack's hook contributions into installed hook files using section markers.
     private mutating func injectHookContributions(from pack: any TechPack) {
-        for contribution in pack.hookContributions {
-            let hookFile = environment.hooksDirectory
-                .appendingPathComponent(contribution.hookName + ".sh")
-            HookInjector.inject(
-                fragment: contribution.scriptFragment,
-                identifier: pack.identifier,
-                into: hookFile,
-                backup: &backup,
-                output: output
-            )
-        }
+        var exec = executor
+        exec.injectHookContributions(from: pack)
+        backup = exec.backup
     }
 
-    /// Add a pack's gitignore entries to the global gitignore.
     private func addPackGitignoreEntries(from pack: any TechPack) {
-        guard !pack.gitignoreEntries.isEmpty else { return }
-        let manager = GitignoreManager(shell: shell)
-        for entry in pack.gitignoreEntries {
-            do {
-                try manager.addEntry(entry)
-            } catch {
-                output.warn("Failed to add gitignore entry '\(entry)': \(error.localizedDescription)")
-            }
-        }
+        executor.addPackGitignoreEntries(from: pack)
     }
 
-    // MARK: - Already-installed detection
-
-    /// Check if a component is already installed.
-    /// Delegates to the same derived + supplementary doctor checks used by `mcs doctor`,
-    /// ensuring install and doctor always use the same detection logic.
-    /// Returns true if ANY check (derived OR supplementary) passes — this means
-    /// a component with a passing supplementary check is considered installed even
-    /// if its derived check fails.
     private func isAlreadyInstalled(_ component: ComponentDefinition) -> Bool {
-        // Idempotent actions: always re-run
-        switch component.installAction {
-        case .settingsMerge, .gitignoreEntries:
-            return false
-        default:
-            break
-        }
-
-        // Try derived check (auto-generated from installAction)
-        if let check = component.deriveDoctorCheck() {
-            if case .pass = check.check() { return true }
-        }
-
-        // Try supplementary checks (component-specific extras)
-        for check in component.supplementaryChecks {
-            if case .pass = check.check() { return true }
-        }
-
-        return false
+        ComponentExecutor.isAlreadyInstalled(component)
     }
 
     // MARK: - Continuous Learning Post-Processing
