@@ -22,6 +22,7 @@ enum IOSDoctorChecks {
             XcodeBuildMCPServerCheck(),
             SosumiServerCheck(),
             XcodeBuildMCPSkillCheck(),
+            SwiftCodeReviewerSkillCheck(),
             XcodeBuildMCPConfigCheck(),
             CLAUDELocalIOSSectionCheck(),
         ]
@@ -110,6 +111,24 @@ struct XcodeBuildMCPSkillCheck: DoctorCheck, Sendable {
             return .pass("Installed")
         }
         return .fail("xcodebuildmcp skill not installed")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs install' to install skills")
+    }
+}
+
+struct SwiftCodeReviewerSkillCheck: DoctorCheck, Sendable {
+    let section = "iOS"
+    let name = "swift-code-reviewer skill"
+
+    func check() -> CheckResult {
+        let skillsDir = Environment().skillsDirectory
+        let skillPath = skillsDir.appendingPathComponent("swift-code-reviewer-skill")
+        if FileManager.default.fileExists(atPath: skillPath.path) {
+            return .pass("Installed")
+        }
+        return .fail("swift-code-reviewer skill not installed")
     }
 
     func fix() -> FixResult {
