@@ -33,38 +33,89 @@ struct IOSTechPack: TechPack {
         IOSDoctorChecks.supplementary
     }
 
+    func templateValues(context: ProjectConfigContext) -> [String: String] {
+        guard let project = resolveXcodeProject(context: context) else {
+            context.output.warn(
+                "Skipping iOS template — no Xcode project selected. "
+                + "Re-run 'mcs configure --pack ios' to set one."
+            )
+            return [:]
+        }
+        return [IOSConstants.TemplateKeys.project: project]
+    }
+
     func configureProject(at path: URL, context: ProjectConfigContext) throws {
+        guard let projectFile = context.resolvedValues[IOSConstants.TemplateKeys.project] else {
+            // templateValues() already warned the user
+            return
+        }
+
         let configDir = path.appendingPathComponent(IOSConstants.FileNames.xcodeBuildMCPDirectory)
         let configFile = configDir.appendingPathComponent("config.yaml")
-
-        // Auto-detect Xcode project file, preferring .xcworkspace over .xcodeproj
-        let projectFile = Self.detectXcodeProject(in: path) ?? "__PROJECT__"
-
         let configContent = IOSTemplates.xcodeBuildMCPConfig(projectFile: projectFile)
 
         try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
         try configContent.write(to: configFile, atomically: true, encoding: .utf8)
     }
 
-    /// Find the first .xcworkspace or .xcodeproj in the directory.
-    /// Prefers workspace over project, ignores nested ones (e.g., inside Pods/).
-    static func detectXcodeProject(in directory: URL) -> String? {
+    // MARK: - Xcode Project Detection
+
+    /// Detect and prompt for Xcode project/workspace selection.
+    private func resolveXcodeProject(context: ProjectConfigContext) -> String? {
+        let output = context.output
+        let projects: [String]
+        do {
+            projects = try Self.detectXcodeProjects(in: context.projectPath)
+        } catch {
+            output.warn("Could not read project directory: \(error.localizedDescription)")
+            let entered = output.promptInline("Enter project file name (e.g. MyApp.xcodeproj)")
+            return entered.isEmpty ? nil : entered
+        }
+
+        switch projects.count {
+        case 0:
+            output.warn("No .xcodeproj or .xcworkspace found in \(context.projectPath.lastPathComponent)")
+            let entered = output.promptInline("Enter project file name (e.g. MyApp.xcodeproj)")
+            return entered.isEmpty ? nil : entered
+
+        case 1:
+            output.info("Found: \(projects[0])")
+            return projects[0]
+
+        default:
+            let items = projects.map { name -> (name: String, description: String) in
+                let ext = (name as NSString).pathExtension
+                let desc = ext == "xcworkspace" ? "Workspace" : "Project"
+                return (name: name, description: desc)
+            }
+            let selected = output.singleSelect(
+                title: "Multiple Xcode projects found — select one:",
+                items: items
+            )
+            return projects[selected]
+        }
+    }
+
+    /// Find all .xcworkspace and .xcodeproj files at the top level of a directory.
+    /// Results are sorted: workspaces first, then projects, alphabetically within each group.
+    /// Throws if the directory cannot be read (permissions, missing path, I/O error).
+    static func detectXcodeProjects(in directory: URL) throws -> [String] {
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
+        let contents = try fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else {
-            return nil
-        }
+        )
 
-        // Prefer workspace (used by CocoaPods, SPM-generated workspaces)
-        if let workspace = contents.first(where: { $0.pathExtension == "xcworkspace" }) {
-            return workspace.lastPathComponent
-        }
-        if let project = contents.first(where: { $0.pathExtension == "xcodeproj" }) {
-            return project.lastPathComponent
-        }
-        return nil
+        let workspaces = contents
+            .filter { $0.pathExtension == "xcworkspace" }
+            .map(\.lastPathComponent)
+            .sorted()
+        let projects = contents
+            .filter { $0.pathExtension == "xcodeproj" }
+            .map(\.lastPathComponent)
+            .sorted()
+
+        return workspaces + projects
     }
 }

@@ -8,4 +8,11 @@ enum IOSConstants {
         /// The XcodeBuildMCP configuration directory name.
         static let xcodeBuildMCPDirectory = ".xcodebuildmcp"
     }
+
+    // MARK: - Template Keys
+
+    enum TemplateKeys {
+        /// Key for the Xcode project/workspace file name in template values.
+        static let project = "PROJECT"
+    }
 }

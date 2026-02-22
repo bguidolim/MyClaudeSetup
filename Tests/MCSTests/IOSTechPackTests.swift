@@ -14,7 +14,7 @@ struct IOSTechPackTests {
 
     // MARK: - Project detection
 
-    @Test("detectXcodeProject finds .xcodeproj")
+    @Test("detectXcodeProjects finds .xcodeproj")
     func detectXcodeproj() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -22,12 +22,12 @@ struct IOSTechPackTests {
         let projDir = tmpDir.appendingPathComponent("MyApp.xcodeproj")
         try FileManager.default.createDirectory(at: projDir, withIntermediateDirectories: true)
 
-        let result = IOSTechPack.detectXcodeProject(in: tmpDir)
-        #expect(result == "MyApp.xcodeproj")
+        let result = try IOSTechPack.detectXcodeProjects(in: tmpDir)
+        #expect(result == ["MyApp.xcodeproj"])
     }
 
-    @Test("detectXcodeProject prefers .xcworkspace over .xcodeproj")
-    func detectPrefersWorkspace() throws {
+    @Test("detectXcodeProjects lists workspaces before projects")
+    func detectListsWorkspacesFirst() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -36,17 +36,82 @@ struct IOSTechPackTests {
         try FileManager.default.createDirectory(at: projDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
 
-        let result = IOSTechPack.detectXcodeProject(in: tmpDir)
-        #expect(result == "MyApp.xcworkspace")
+        let result = try IOSTechPack.detectXcodeProjects(in: tmpDir)
+        #expect(result == ["MyApp.xcworkspace", "MyApp.xcodeproj"])
     }
 
-    @Test("detectXcodeProject returns nil when no project found")
+    @Test("detectXcodeProjects returns empty when no project found")
     func detectNoProject() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let result = IOSTechPack.detectXcodeProject(in: tmpDir)
-        #expect(result == nil)
+        let result = try IOSTechPack.detectXcodeProjects(in: tmpDir)
+        #expect(result.isEmpty)
+    }
+
+    @Test("detectXcodeProjects sorts alphabetically within groups")
+    func detectSortsAlphabetically() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        for name in ["Z.xcworkspace", "A.xcworkspace", "Z.xcodeproj", "A.xcodeproj"] {
+            try FileManager.default.createDirectory(
+                at: tmpDir.appendingPathComponent(name),
+                withIntermediateDirectories: true
+            )
+        }
+
+        let result = try IOSTechPack.detectXcodeProjects(in: tmpDir)
+        #expect(result == ["A.xcworkspace", "Z.xcworkspace", "A.xcodeproj", "Z.xcodeproj"])
+    }
+
+    @Test("detectXcodeProjects throws for non-existent directory")
+    func detectThrowsForMissingDir() throws {
+        let bogus = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-nonexistent-\(UUID().uuidString)")
+        #expect(throws: (any Error).self) {
+            try IOSTechPack.detectXcodeProjects(in: bogus)
+        }
+    }
+
+    @Test("templateValues returns PROJECT for single-project directory")
+    func templateValuesSingleProject() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("MyApp.xcodeproj"),
+            withIntermediateDirectories: true
+        )
+
+        let pack = IOSTechPack()
+        let context = ProjectConfigContext(
+            projectPath: tmpDir,
+            repoName: "test",
+            output: CLIOutput()
+        )
+        let values = pack.templateValues(context: context)
+        #expect(values[IOSConstants.TemplateKeys.project] == "MyApp.xcodeproj")
+    }
+
+    @Test("configureProject skips when no PROJECT in resolvedValues")
+    func configureProjectSkipsWithoutProject() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let pack = IOSTechPack()
+        let context = ProjectConfigContext(
+            projectPath: tmpDir,
+            repoName: "test",
+            output: CLIOutput()
+        )
+        try pack.configureProject(at: tmpDir, context: context)
+
+        // config.yaml should not be created
+        let configFile = tmpDir
+            .appendingPathComponent(IOSConstants.FileNames.xcodeBuildMCPDirectory)
+            .appendingPathComponent("config.yaml")
+        #expect(!FileManager.default.fileExists(atPath: configFile.path))
     }
 
     // MARK: - Pack identity
