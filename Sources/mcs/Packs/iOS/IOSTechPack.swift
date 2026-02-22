@@ -35,16 +35,23 @@ struct IOSTechPack: TechPack {
 
     func templateValues(context: ProjectConfigContext) -> [String: String] {
         guard let project = resolveXcodeProject(context: context) else {
+            context.output.warn(
+                "Skipping iOS template — no Xcode project selected. "
+                + "Re-run 'mcs configure --pack ios' to set one."
+            )
             return [:]
         }
-        return ["PROJECT": project]
+        return [IOSConstants.TemplateKeys.project: project]
     }
 
     func configureProject(at path: URL, context: ProjectConfigContext) throws {
+        guard let projectFile = context.resolvedValues[IOSConstants.TemplateKeys.project] else {
+            // templateValues() already warned the user
+            return
+        }
+
         let configDir = path.appendingPathComponent(IOSConstants.FileNames.xcodeBuildMCPDirectory)
         let configFile = configDir.appendingPathComponent("config.yaml")
-
-        let projectFile = context.resolvedValues["PROJECT"] ?? "__PROJECT__"
         let configContent = IOSTemplates.xcodeBuildMCPConfig(projectFile: projectFile)
 
         try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
@@ -56,7 +63,14 @@ struct IOSTechPack: TechPack {
     /// Detect and prompt for Xcode project/workspace selection.
     private func resolveXcodeProject(context: ProjectConfigContext) -> String? {
         let output = context.output
-        let projects = Self.detectXcodeProjects(in: context.projectPath)
+        let projects: [String]
+        do {
+            projects = try Self.detectXcodeProjects(in: context.projectPath)
+        } catch {
+            output.warn("Could not read project directory: \(error.localizedDescription)")
+            let entered = output.promptInline("Enter project file name (e.g. MyApp.xcodeproj)")
+            return entered.isEmpty ? nil : entered
+        }
 
         switch projects.count {
         case 0:
@@ -84,15 +98,14 @@ struct IOSTechPack: TechPack {
 
     /// Find all .xcworkspace and .xcodeproj files at the top level of a directory.
     /// Results are sorted: workspaces first, then projects, alphabetically within each group.
-    static func detectXcodeProjects(in directory: URL) -> [String] {
+    /// Throws if the directory cannot be read (permissions, missing path, I/O error).
+    static func detectXcodeProjects(in directory: URL) throws -> [String] {
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
+        let contents = try fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
+        )
 
         let workspaces = contents
             .filter { $0.pathExtension == "xcworkspace" }

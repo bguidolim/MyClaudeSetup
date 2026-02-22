@@ -94,13 +94,15 @@ struct PackInstaller {
             let hookFileName = contribution.hookName + ".sh"
             let installedHook = environment.hooksDirectory.appendingPathComponent(hookFileName)
             let relativePath = "hooks/\(hookFileName)"
-            if FileManager.default.fileExists(atPath: installedHook.path) {
-                do {
-                    let hash = try Manifest.sha256(of: installedHook)
-                    manifest.recordHash(relativePath: relativePath, hash: hash)
-                } catch {
-                    output.warn("Could not update manifest hash for \(hookFileName): \(error.localizedDescription)")
-                }
+            guard FileManager.default.fileExists(atPath: installedHook.path) else {
+                output.warn("Expected hook file \(hookFileName) not found — hash not recorded")
+                continue
+            }
+            do {
+                let hash = try Manifest.sha256(of: installedHook)
+                manifest.recordHash(relativePath: relativePath, hash: hash)
+            } catch {
+                output.warn("Could not update manifest hash for \(hookFileName): \(error.localizedDescription)")
             }
         }
 

@@ -41,6 +41,17 @@ struct CoreTechPackTests {
         #expect(pack.supplementaryDoctorChecks.isEmpty)
     }
 
+    @Test("Core pack returns empty template values by default")
+    func emptyTemplateValues() {
+        let pack = CoreTechPack()
+        let context = ProjectConfigContext(
+            projectPath: FileManager.default.temporaryDirectory,
+            repoName: "test",
+            output: CLIOutput()
+        )
+        #expect(pack.templateValues(context: context).isEmpty)
+    }
+
     @Test("configureProject is a no-op")
     func configureNoOp() throws {
         let tmpDir = FileManager.default.temporaryDirectory

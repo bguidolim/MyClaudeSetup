@@ -156,7 +156,7 @@ struct ProjectConfigurator {
     // MARK: - CLAUDE.local.md Writing
 
     /// Compose and write CLAUDE.local.md from template contributions.
-    private func writeClaudeLocal(
+    func writeClaudeLocal(
         at projectPath: URL,
         contributions: [TemplateContribution],
         values: [String: String]
