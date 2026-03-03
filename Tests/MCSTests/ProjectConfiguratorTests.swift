@@ -229,7 +229,8 @@ struct PackSettingsMergeTests {
 
         // Check settings.local.json was created with merged settings
         let result = try Settings.load(from: settingsPath)
-        let env = try #require(JSONSerialization.jsonObject(with: #require(result.extraJSON["env"])) as? [String: String])
+        let envData = try #require(result.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["MY_KEY"] == "my_value")
         #expect(result.extraJSON["alwaysThinkingEnabled"] != nil)
     }
@@ -295,7 +296,8 @@ struct PackSettingsMergeTests {
 
         let settingsPath = claudeDir.appendingPathComponent("settings.local.json")
         let result = try Settings.load(from: settingsPath)
-        let env = try #require(JSONSerialization.jsonObject(with: #require(result.extraJSON["env"])) as? [String: String])
+        let envData = try #require(result.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY_A"] == "value_a")
         #expect(env["KEY_B"] == "value_b")
         #expect(result.enabledPlugins?["my-plugin"] == true)

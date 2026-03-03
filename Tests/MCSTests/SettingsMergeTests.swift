@@ -42,9 +42,11 @@ struct SettingsMergeTests {
 
         base.merge(with: other)
 
-        let env = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["env"])) as? [String: String])
+        let envData = try #require(base.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "value")
-        let perms = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["permissions"])) as? [String: Any])
+        let permsData = try #require(base.extraJSON["permissions"])
+        let perms = try #require(JSONSerialization.jsonObject(with: permsData) as? [String: Any])
         #expect(perms["defaultMode"] as? String == "allowEdits")
         #expect(base.hooks?["PreToolUse"]?.count == 1)
         #expect(base.enabledPlugins?["my-plugin"] == true)
@@ -68,7 +70,8 @@ struct SettingsMergeTests {
 
         base.merge(with: other)
 
-        let env = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["env"])) as? [String: String])
+        let envData = try #require(base.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["EXISTING"] == "keep")
         #expect(env["SHARED"] == "original") // existing NOT overwritten
         #expect(env["NEW"] == "added")
@@ -207,9 +210,11 @@ struct SettingsMergeTests {
         try original.save(to: file)
         let loaded = try Settings.load(from: file)
 
-        let env = try #require(JSONSerialization.jsonObject(with: #require(loaded.extraJSON["env"])) as? [String: String])
+        let envData = try #require(loaded.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["FOO"] == "bar")
-        let perms = try #require(JSONSerialization.jsonObject(with: #require(loaded.extraJSON["permissions"])) as? [String: Any])
+        let permsData = try #require(loaded.extraJSON["permissions"])
+        let perms = try #require(JSONSerialization.jsonObject(with: permsData) as? [String: Any])
         #expect(perms["defaultMode"] as? String == "allowEdits")
         #expect(loaded.enabledPlugins?["p"] == true)
         let thinking = try #require(JSONSerialization.jsonObject(
@@ -280,7 +285,8 @@ struct SettingsMergeTests {
         try settings.save(to: file)
 
         let loaded = try Settings.load(from: file)
-        let env = try #require(JSONSerialization.jsonObject(with: #require(loaded.extraJSON["env"])) as? [String: String])
+        let envData = try #require(loaded.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "val")
         #expect(loaded.extraJSON["alwaysThinkingEnabled"] != nil)
     }
@@ -311,7 +317,8 @@ struct SettingsMergeTests {
 
         // All non-typed keys captured in extraJSON
         #expect(settings.extraJSON["env"] != nil)
-        let env = try #require(JSONSerialization.jsonObject(with: #require(settings.extraJSON["env"])) as? [String: String])
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "value")
         #expect(settings.extraJSON["attribution"] != nil)
         #expect(settings.extraJSON["customFeature"] != nil)
@@ -333,7 +340,8 @@ struct SettingsMergeTests {
         base.merge(with: other)
 
         // Dict-level merge: existing "commit" preserved, "newField" added
-        let merged = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["attribution"])) as? [String: Any])
+        let mergedData = try #require(base.extraJSON["attribution"])
+        let merged = try #require(JSONSerialization.jsonObject(with: mergedData) as? [String: Any])
         #expect(merged["commit"] as? String == "tool-a")
         #expect(merged["newField"] as? String == "x")
 
@@ -351,7 +359,8 @@ struct SettingsMergeTests {
 
         base.merge(with: other)
 
-        let result = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["flag"]), options: .fragmentsAllowed) as? Bool)
+        let resultData = try #require(base.extraJSON["flag"])
+        let result = try #require(JSONSerialization.jsonObject(with: resultData, options: .fragmentsAllowed) as? Bool)
         #expect(result == false) // existing wins
     }
 
@@ -406,7 +415,8 @@ struct SettingsMergeTests {
         settings.removeKeys(["env.FOO"])
 
         // "FOO" removed, "BAZ" preserved
-        let result = try #require(JSONSerialization.jsonObject(with: #require(settings.extraJSON["env"])) as? [String: String])
+        let resultData = try #require(settings.extraJSON["env"])
+        let result = try #require(JSONSerialization.jsonObject(with: resultData) as? [String: String])
         #expect(result["FOO"] == nil)
         #expect(result["BAZ"] == "qux")
     }
@@ -480,7 +490,8 @@ struct SettingsMergeTests {
         base.merge(with: other)
 
         // Existing "defaultMode" preserved, "newField" added via dict-level merge
-        let rawPerms = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["permissions"])) as? [String: Any])
+        let rawPermsData = try #require(base.extraJSON["permissions"])
+        let rawPerms = try #require(JSONSerialization.jsonObject(with: rawPermsData) as? [String: Any])
         #expect(rawPerms["defaultMode"] as? String == "plan")
         #expect(rawPerms["newField"] as? String == "x")
     }
@@ -607,7 +618,8 @@ struct SettingsMergeTests {
         base.merge(with: other)
 
         // Existing dict preserved (neither is overwritten)
-        let result = try #require(JSONSerialization.jsonObject(with: #require(base.extraJSON["config"])) as? [String: String])
+        let resultData = try #require(base.extraJSON["config"])
+        let result = try #require(JSONSerialization.jsonObject(with: resultData) as? [String: String])
         #expect(result["key"] == "val")
     }
 }

@@ -382,7 +382,8 @@ struct SettingsLoadSubstitutionTests {
 
         let settings = try Settings.load(from: url, substituting: ["USER_API_KEY": "secret123"])
 
-        let env = try #require(JSONSerialization.jsonObject(with: #require(settings.extraJSON["env"])) as? [String: String])
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["API_KEY"] == "secret123")
         #expect(env["STATIC"] == "unchanged")
     }
@@ -404,7 +405,8 @@ struct SettingsLoadSubstitutionTests {
 
         let settings = try Settings.load(from: url, substituting: [:])
 
-        let env = try #require(JSONSerialization.jsonObject(with: #require(settings.extraJSON["env"])) as? [String: String])
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "__PLACEHOLDER__")
     }
 
@@ -429,7 +431,8 @@ struct SettingsLoadSubstitutionTests {
             substituting: ["SOME_PATH": #"C:\Users\me "quoted""#]
         )
 
-        let env = try #require(JSONSerialization.jsonObject(with: #require(settings.extraJSON["env"])) as? [String: String])
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["PATH_VAR"] == #"C:\Users\me "quoted""#)
     }
 

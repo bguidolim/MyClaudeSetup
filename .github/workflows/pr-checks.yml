@@ -30,6 +30,7 @@ jobs:
 
   resolve:
     name: Resolve Dependencies
+    needs: lint
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
