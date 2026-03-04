@@ -18,12 +18,18 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Yams", package: "Yams"),
             ],
-            path: "Sources/mcs"
+            path: "Sources/mcs",
+            swiftSettings: [
+                .unsafeFlags(["-warnings-as-errors"]),
+            ]
         ),
         .testTarget(
             name: "MCSTests",
             dependencies: ["mcs"],
-            path: "Tests/MCSTests"
+            path: "Tests/MCSTests",
+            swiftSettings: [
+                .unsafeFlags(["-warnings-as-errors"]),
+            ]
         ),
     ]
 )
