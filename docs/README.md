@@ -6,7 +6,7 @@ Documentation for [Managed Claude Stack (mcs)](../README.md) — a configuration
 
 New to mcs? Start here:
 
-1. [Install and Quick Start](../README.md#-quick-start) — Get your first pack running in under 2 minutes
+1. [Install and Quick Start](../README.md#quick-start) — Get your first pack running in under 2 minutes
 2. [CLI Reference](cli.md) — Complete command reference (`sync`, `pack`, `doctor`, `export`, `cleanup`)
 3. [Troubleshooting](troubleshooting.md) — Common issues and fixes
 
