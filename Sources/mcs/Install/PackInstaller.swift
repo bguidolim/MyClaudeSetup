@@ -110,7 +110,7 @@ struct PackInstaller {
                 source: source,
                 destination: destination,
                 fileType: fileType
-            )
+            ).success
 
         case .settingsMerge:
             // Settings merge is handled at the project level by Configurator.
