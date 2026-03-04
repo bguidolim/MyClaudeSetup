@@ -342,7 +342,7 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 | **Idempotent** | Every `mcs sync` run converges to the same desired state. Safe to run any number of times — re-copies files, re-composes settings, re-registers MCP servers. |
 | **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
 | **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |
-| **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. If a hash doesn't match, the pack is rejected. Local packs skip verification since scripts change during development. |
+| **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. Modified scripts are detected and the user is prompted to re-trust before proceeding. Local packs skip verification since scripts change during development. |
 | **Lockfile** | `mcs.lock.yaml` pins pack commits for reproducible environments. Use `--lock` to check out pinned versions or `--update` to fetch latest and refresh the lockfile. |
 
 ## Concurrency Model

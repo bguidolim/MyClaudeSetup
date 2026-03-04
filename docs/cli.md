@@ -92,6 +92,7 @@ mcs doctor --global              # Check globally-configured packs only
 | Flag | Description |
 |------|-------------|
 | `--fix` | Auto-fix issues where possible (re-add gitignore entries, create missing state files, etc.). |
+| `-y, --yes` | Skip confirmation prompt before applying fixes (use with `--fix`). |
 | `--pack <name>` | Only check a specific pack. |
 | `--global` | Only check globally-configured packs. |
 
