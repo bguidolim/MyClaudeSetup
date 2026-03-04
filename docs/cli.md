@@ -1,6 +1,6 @@
 # CLI Reference
 
-Complete command reference for `mcs`. For a quick introduction, see the [README](../README.md#quick-start).
+Complete command reference for `mcs`. For a quick introduction, see the [README](../README.md#-quick-start).
 
 ## `mcs sync`
 
