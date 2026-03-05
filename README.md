@@ -10,45 +10,11 @@
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-FBB040.svg?logo=homebrew&logoColor=white)](https://github.com/bguidolim/homebrew-tap)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-❤️-ea4aaa.svg?logo=github)](https://github.com/sponsors/bguidolim)
 
-<br/>
-
 </div>
 
 ---
 > [!WARNING]
 > **This project is under active development.** Expect breaking changes, bugs, and incomplete features. Migrations between versions are not guaranteed. Use at your own risk.
----
-
-## Quick Install
-```bash
-brew install bguidolim/tap/managed-claude-stack
-mcs pack add you/your-pack
-mcs sync
-```
----
-
-## The Problem
-
-You've spent hours getting Claude Code just right — MCP servers, plugins, hooks, skills, custom commands, fine-tuned settings. Then:
-
-- 🖥️ **New machine?** Start over from scratch.
-- 👥 **Onboarding a teammate?** "Just follow this 47-step wiki page."
-- 📂 **Different projects?** Copy-paste configs, hope nothing drifts.
-- 🔄 **Something broke?** Good luck figuring out what changed.
-
-## The Solution
-
-`mcs` is a **configuration engine for Claude Code** — like Ansible for your AI development environment. Package everything into shareable **tech packs** (Git repos with a `techpack.yaml` manifest), then sync them across any project, any machine, in seconds.
-
-| Without `mcs` | With `mcs` |
-|---|---|
-| Install MCP servers one by one | `mcs pack add` + `mcs sync` |
-| Hand-edit `settings.json` per project | Managed settings composition |
-| Copy hooks between projects manually | Auto-installed per-project from packs |
-| Configuration drifts silently | `mcs doctor --fix` detects and repairs |
-| Rebuild from memory on new machines | Fully reproducible in minutes |
-| No way to share your setup | Push a pack, anyone can `mcs pack add` it |
-
 ---
 
 ## 🚀 Quick Start
@@ -62,8 +28,8 @@ brew install bguidolim/tap/managed-claude-stack
 ### 2. Add tech packs
 
 ```bash
-mcs pack add bguidolim/mcs-core-pack
 mcs pack add bguidolim/mcs-continuous-learning
+mcs pack add you/your-pack
 ```
 
 ### 3. Sync a project
@@ -93,6 +59,30 @@ That's it. Your MCP servers, plugins, hooks, skills, commands, agents, settings,
 - [Homebrew](https://brew.sh)
 
 </details>
+
+---
+
+## The Problem
+
+You've spent hours getting Claude Code just right — MCP servers, plugins, hooks, skills, custom commands, fine-tuned settings. Then:
+
+- 🖥️ **New machine?** Start over from scratch.
+- 👥 **Onboarding a teammate?** "Just follow this 47-step wiki page."
+- 📂 **Different projects?** Copy-paste configs, hope nothing drifts.
+- 🔄 **Something broke?** Good luck figuring out what changed.
+
+## The Solution
+
+`mcs` is a **configuration engine for Claude Code** — like Ansible for your AI development environment. Package everything into shareable **tech packs** (Git repos with a `techpack.yaml` manifest), then sync them across any project, any machine, in seconds.
+
+| Without `mcs` | With `mcs` |
+|---|---|
+| Install MCP servers one by one | `mcs pack add` + `mcs sync` |
+| Hand-edit `settings.json` per project | Managed settings composition |
+| Copy hooks between projects manually | Auto-installed per-project from packs |
+| Configuration drifts silently | `mcs doctor --fix` detects and repairs |
+| Rebuild from memory on new machines | Fully reproducible in minutes |
+| No way to share your setup | Push a pack, anyone can `mcs pack add` it |
 
 ---
 
