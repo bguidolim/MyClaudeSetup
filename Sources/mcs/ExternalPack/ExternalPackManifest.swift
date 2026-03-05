@@ -51,9 +51,9 @@ extension ExternalPackManifest {
         }
 
         // Component ID prefix and dependency resolution
+        var seenComponentIDs = Set<String>()
         if let components {
             let expectedPrefix = "\(identifier)."
-            var seenIDs = Set<String>()
             for component in components {
                 guard component.id.hasPrefix(expectedPrefix) else {
                     throw ManifestError.componentIDPrefixViolation(
@@ -61,10 +61,10 @@ extension ExternalPackManifest {
                         expectedPrefix: expectedPrefix
                     )
                 }
-                guard !seenIDs.contains(component.id) else {
+                guard !seenComponentIDs.contains(component.id) else {
                     throw ManifestError.duplicateComponentID(component.id)
                 }
-                seenIDs.insert(component.id)
+                seenComponentIDs.insert(component.id)
 
                 // Validate hookEvent against known Claude Code hook events
                 if let hookEvent = component.hookEvent {
@@ -80,7 +80,7 @@ extension ExternalPackManifest {
             // Validate intra-pack dependency references resolve to existing component IDs
             for component in components {
                 for dep in component.dependencies ?? [] {
-                    if dep.hasPrefix(expectedPrefix), !seenIDs.contains(dep) {
+                    if dep.hasPrefix(expectedPrefix), !seenComponentIDs.contains(dep) {
                         throw ManifestError.unresolvedDependency(
                             componentID: component.id,
                             dependency: dep
@@ -98,6 +98,14 @@ extension ExternalPackManifest {
                         sectionIdentifier: template.sectionIdentifier,
                         packIdentifier: identifier
                     )
+                }
+                for dep in template.dependencies ?? [] {
+                    guard seenComponentIDs.contains(dep) else {
+                        throw ManifestError.templateDependencyMismatch(
+                            sectionIdentifier: template.sectionIdentifier,
+                            componentID: dep
+                        )
+                    }
                 }
             }
         }
@@ -194,6 +202,12 @@ extension ExternalPackManifest {
                 throw ManifestError.dotInRawID(t.sectionIdentifier)
             }
             t.sectionIdentifier = prefix + t.sectionIdentifier
+            t.dependencies = try t.dependencies?.map { dep in
+                guard !dep.contains(".") else {
+                    throw ManifestError.dotInRawID(dep)
+                }
+                return prefix + dep
+            }
             return t
         }
         return ExternalPackManifest(
@@ -225,6 +239,7 @@ enum ManifestError: Error, Equatable, LocalizedError {
     case duplicatePromptKey(String)
     case invalidDoctorCheck(name: String, reason: String)
     case dotInRawID(String)
+    case templateDependencyMismatch(sectionIdentifier: String, componentID: String)
     case unresolvedDependency(componentID: String, dependency: String)
     case invalidHookEvent(componentID: String, hookEvent: String)
 
@@ -242,6 +257,8 @@ enum ManifestError: Error, Equatable, LocalizedError {
             "Duplicate component ID: '\(id)'"
         case let .templateSectionMismatch(section, pack):
             "Template section '\(section)' must be prefixed with '\(pack).' (e.g. '\(pack).main')"
+        case let .templateDependencyMismatch(section, component):
+            "Template '\(section)' depends on component '\(component)' which does not exist in the pack"
         case let .duplicatePromptKey(key):
             "Duplicate prompt key: '\(key)'"
         case let .invalidDoctorCheck(name, reason):
@@ -665,6 +682,7 @@ struct ExternalTemplateDefinition: Codable {
     var sectionIdentifier: String
     let placeholders: [String]?
     let contentFile: String
+    var dependencies: [String]?
 }
 
 // MARK: - Configure Project
