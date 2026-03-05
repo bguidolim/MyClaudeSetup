@@ -2,7 +2,7 @@ import Foundation
 
 /// Unified configuration engine for both project-scoped and global-scoped sync.
 ///
-/// Implements the 12-phase convergence flow once, delegating scope-specific
+/// Implements the multi-phase convergence flow once, delegating scope-specific
 /// behavior to a `SyncStrategy` (project or global). Data-level differences
 /// (paths, flags) are captured in `SyncScope`.
 struct Configurator {
@@ -411,7 +411,8 @@ struct Configurator {
     /// When `--customize` changes which components are excluded within a still-selected pack,
     /// artifacts from newly-excluded components must be cleaned up. This method compares
     /// the previous exclusion set (from state) with the current one to find newly-excluded
-    /// components, then removes their artifacts using the same mechanisms as `unconfigurePack()`.
+    /// components, then removes their artifacts (MCP servers, files, brew, plugins, gitignore)
+    /// driven by component definitions rather than artifact records.
     private func removeNewlyExcludedComponentArtifacts(
         packs: [any TechPack],
         excludedComponents: [String: Set<String>],
@@ -496,6 +497,8 @@ struct Configurator {
                     }
 
                 case .shellCommand, .settingsMerge:
+                    // Shell command side effects cannot be automatically reversed.
+                    // Settings keys are handled by step 6 (composeSettings rebuilds from scratch).
                     break
                 }
             }
@@ -578,7 +581,7 @@ struct Configurator {
     /// Pre-load templates from disk (single read per pack), filtering excluded dependencies.
     ///
     /// Templates whose `dependencies` include an excluded component are filtered out,
-    /// so they won't appear in CLAUDE.md or artifact records.
+    /// so they won't appear in the CLAUDE file or artifact records.
     /// Results are cached for use in both artifact installation (step 5)
     /// and CLAUDE file composition (step 7).
     private func preloadTemplates(
@@ -631,7 +634,7 @@ struct Configurator {
             let isNew = additions.contains(pack.identifier)
             output.info("\(isNew ? "Configuring" : "Updating") \(pack.displayName)\(scope.labelSuffix)...")
             var exec = makeExecutor()
-            let artifacts = strategy.installArtifacts(
+            var artifacts = strategy.installArtifacts(
                 pack,
                 previousArtifacts: previousArtifacts,
                 excludedIDs: excluded,
@@ -643,7 +646,7 @@ struct Configurator {
             )
             reconcileStaleArtifacts(
                 previousArtifacts: previousArtifacts,
-                currentArtifacts: artifacts,
+                currentArtifacts: &artifacts,
                 packID: pack.identifier
             )
             state.setArtifacts(artifacts, for: pack.identifier)
@@ -696,10 +699,14 @@ struct Configurator {
     ///
     /// After `installArtifacts()` produces a fresh `PackArtifactRecord`, this method diffs it
     /// against the previous record to find stale artifacts (from removed/renamed components or
-    /// scope changes) and cleans them up. Template sections are handled separately in step 7b.
+    /// scope changes) and cleans them up. Failed removals are re-added to `currentArtifacts`
+    /// so they remain tracked and will be retried on the next sync.
+    ///
+    /// Hook commands and settings keys are handled by step 6 (settings composition),
+    /// which rebuilds from current pack definitions. Template sections are handled in step 7b.
     private func reconcileStaleArtifacts(
         previousArtifacts: PackArtifactRecord?,
-        currentArtifacts: PackArtifactRecord,
+        currentArtifacts: inout PackArtifactRecord,
         packID: String
     ) {
         guard let previous = previousArtifacts else { return }
@@ -708,16 +715,24 @@ struct Configurator {
 
         // MCP servers (catches both removals and scope changes — MCPServerRef hashes on name+scope)
         let staleMCPs = Set(previous.mcpServers).subtracting(currentArtifacts.mcpServers)
-        for server in staleMCPs
-            where exec.removeMCPServer(name: server.name, scope: server.scope) {
-            output.dimmed("  Removed stale MCP server: \(server.name) (scope: \(server.scope))")
+        for server in staleMCPs {
+            if exec.removeMCPServer(name: server.name, scope: server.scope) {
+                output.dimmed("  Removed stale MCP server: \(server.name) (scope: \(server.scope))")
+            } else {
+                currentArtifacts.mcpServers.append(server)
+                output.warn("  Could not remove stale MCP server '\(server.name)' — will retry on next sync")
+            }
         }
 
         // Files
         let staleFiles = Set(previous.files).subtracting(currentArtifacts.files)
-        for path in staleFiles
-            where strategy.removeFileArtifact(relativePath: path, output: output) {
-            output.dimmed("  Removed stale file: \(path)")
+        for path in staleFiles {
+            if strategy.removeFileArtifact(relativePath: path, output: output) {
+                output.dimmed("  Removed stale file: \(path)")
+            } else {
+                currentArtifacts.files.append(path)
+                output.warn("  Could not remove stale file '\(path)' — will retry on next sync")
+            }
         }
 
         // Gitignore entries
@@ -729,6 +744,7 @@ struct Configurator {
                     try gitignoreManager.removeEntry(entry)
                     output.dimmed("  Removed stale gitignore entry: \(entry)")
                 } catch {
+                    currentArtifacts.gitignoreEntries.append(entry)
                     output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
                 }
             }
@@ -750,6 +766,9 @@ struct Configurator {
                     output.dimmed("  Keeping brew package '\(package)' — still needed by another scope")
                 } else if exec.uninstallBrewPackage(package) {
                     output.dimmed("  Removed stale brew package: \(package)")
+                } else {
+                    currentArtifacts.brewPackages.append(package)
+                    output.warn("  Could not remove stale brew package '\(package)' — will retry on next sync")
                 }
             }
             for name in stalePlugins {
@@ -761,6 +780,9 @@ struct Configurator {
                     output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope")
                 } else if exec.removePlugin(name) {
                     output.dimmed("  Removed stale plugin: \(PluginRef(name).bareName)")
+                } else {
+                    currentArtifacts.plugins.append(name)
+                    output.warn("  Could not remove stale plugin '\(PluginRef(name).bareName)' — will retry on next sync")
                 }
             }
         }
@@ -770,6 +792,8 @@ struct Configurator {
     ///
     /// Compares previously-tracked sections against what was written this run,
     /// removes orphaned sections from the physical file, and updates artifact records.
+    /// Artifact records are only updated after a successful file write to prevent
+    /// state/disk divergence.
     private func reconcileTemplateSections(
         packs: [any TechPack],
         writtenSections: Set<String>,
@@ -785,6 +809,7 @@ struct Configurator {
         }
 
         // Remove stale sections from the actual CLAUDE file
+        var fileUpdateSucceeded = staleSections.isEmpty
         if !staleSections.isEmpty,
            FileManager.default.fileExists(atPath: scope.claudeFilePath.path) {
             do {
@@ -794,12 +819,15 @@ struct Configurator {
                     output.dimmed("  Removed stale template section: \(sectionID)")
                 }
                 try content.write(to: scope.claudeFilePath, atomically: true, encoding: .utf8)
+                fileUpdateSucceeded = true
             } catch {
                 output.warn("Could not remove stale template sections: \(error.localizedDescription)")
+                output.warn("Stale sections will be retried on next sync")
             }
         }
 
-        // Update artifact records to match written sections
+        // Only update artifact records after successful file modification
+        guard fileUpdateSucceeded else { return }
         for pack in packs {
             if var artifacts = state.artifacts(for: pack.identifier) {
                 let before = artifacts.templateSections.count

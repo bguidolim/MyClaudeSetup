@@ -43,8 +43,8 @@ protocol SyncStrategy {
     /// Global scope loads existing `settings.json`, strips managed hooks, and preserves user content.
     ///
     /// - Parameter previousSettingsKeys: Settings keys tracked in the previous sync's artifact records.
-    ///   Used to strip stale keys before recomposing and to pass as `dropKeys` to `Settings.save()`
-    ///   to prevent Layer 3 re-injection of removed keys.
+    ///   Global scope uses these to strip stale keys before recomposing; both scopes derive
+    ///   `dropKeys` from them to prevent Layer 3 re-injection during `Settings.save()`.
     /// - Returns: A mapping of pack ID to contributed extraJSON key paths.
     func composeSettings(
         packs: [any TechPack],
