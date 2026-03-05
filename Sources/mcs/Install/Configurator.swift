@@ -200,8 +200,7 @@ struct Configurator {
                 let excluded = excludedComponents[pack.identifier] ?? []
                 let allTemplates = try pack.templates
                 preloadedTemplates[pack.identifier] = allTemplates.filter { template in
-                    template.dependencies.isEmpty
-                        || !template.dependencies.contains(where: excluded.contains)
+                    !template.dependencies.contains(where: excluded.contains)
                 }
             } catch {
                 output.warn("Could not load templates for \(pack.displayName): \(error.localizedDescription)")

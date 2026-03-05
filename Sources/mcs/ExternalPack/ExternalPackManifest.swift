@@ -51,9 +51,9 @@ extension ExternalPackManifest {
         }
 
         // Component ID prefix and dependency resolution
+        var seenComponentIDs = Set<String>()
         if let components {
             let expectedPrefix = "\(identifier)."
-            var seenIDs = Set<String>()
             for component in components {
                 guard component.id.hasPrefix(expectedPrefix) else {
                     throw ManifestError.componentIDPrefixViolation(
@@ -61,10 +61,10 @@ extension ExternalPackManifest {
                         expectedPrefix: expectedPrefix
                     )
                 }
-                guard !seenIDs.contains(component.id) else {
+                guard !seenComponentIDs.contains(component.id) else {
                     throw ManifestError.duplicateComponentID(component.id)
                 }
-                seenIDs.insert(component.id)
+                seenComponentIDs.insert(component.id)
 
                 // Validate hookEvent against known Claude Code hook events
                 if let hookEvent = component.hookEvent {
@@ -80,7 +80,7 @@ extension ExternalPackManifest {
             // Validate intra-pack dependency references resolve to existing component IDs
             for component in components {
                 for dep in component.dependencies ?? [] {
-                    if dep.hasPrefix(expectedPrefix), !seenIDs.contains(dep) {
+                    if dep.hasPrefix(expectedPrefix), !seenComponentIDs.contains(dep) {
                         throw ManifestError.unresolvedDependency(
                             componentID: component.id,
                             dependency: dep
@@ -92,7 +92,6 @@ extension ExternalPackManifest {
 
         // Template section identifiers must be prefixed with pack identifier
         if let templates {
-            let componentIDs = Set(components?.map(\.id) ?? [])
             for template in templates {
                 guard template.sectionIdentifier.hasPrefix("\(identifier).") else {
                     throw ManifestError.templateSectionMismatch(
@@ -101,7 +100,7 @@ extension ExternalPackManifest {
                     )
                 }
                 for dep in template.dependencies ?? [] {
-                    guard componentIDs.contains(dep) else {
+                    guard seenComponentIDs.contains(dep) else {
                         throw ManifestError.templateDependencyMismatch(
                             sectionIdentifier: template.sectionIdentifier,
                             componentID: dep
