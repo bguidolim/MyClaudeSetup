@@ -40,9 +40,10 @@ struct FileHasherTests {
             atomically: true, encoding: .utf8
         )
 
-        let results = try FileHasher.directoryFileHashes(at: tmpDir)
-        let paths = results.map(\.relativePath)
+        let result = try FileHasher.directoryFileHashes(at: tmpDir)
+        let paths = result.hashes.map(\.relativePath)
         #expect(paths == ["a.txt", "b.txt"])
-        #expect(results.allSatisfy { !$0.hash.isEmpty })
+        #expect(result.hashes.allSatisfy { !$0.hash.isEmpty })
+        #expect(result.failures.isEmpty)
     }
 }

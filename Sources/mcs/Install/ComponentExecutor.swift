@@ -161,17 +161,17 @@ struct ComponentExecutor {
                     }
                 }
                 // Hash all files recursively (directories can't be hashed directly)
-                do {
-                    for (nestedRelPath, hash) in try FileHasher.directoryFileHashes(at: destURL) {
-                        let fullPath = destURL.appendingPathComponent(nestedRelPath)
-                        let relPath = PathContainment.relativePath(
-                            of: fullPath.path,
-                            within: environment.claudeDirectory.path
-                        )
-                        installedHashes[relPath] = hash
-                    }
-                } catch {
-                    output.warn("Could not compute hashes for \(destination): \(error.localizedDescription)")
+                let hashResult = try FileHasher.directoryFileHashes(at: destURL)
+                for (nestedRelPath, hash) in hashResult.hashes {
+                    let fullPath = destURL.appendingPathComponent(nestedRelPath)
+                    let relPath = PathContainment.relativePath(
+                        of: fullPath.path,
+                        within: environment.claudeDirectory.path
+                    )
+                    installedHashes[relPath] = hash
+                }
+                for (failedPath, error) in hashResult.failures {
+                    output.warn("Could not compute hash for \(failedPath): \(error.localizedDescription)")
                 }
             } else {
                 // Source is a single file
@@ -247,14 +247,14 @@ struct ComponentExecutor {
                     installedPaths.append(relPath)
                 }
                 // Hash all files recursively (directories can't be hashed directly)
-                do {
-                    for (nestedRelPath, hash) in try FileHasher.directoryFileHashes(at: destURL) {
-                        let fullPath = destURL.appendingPathComponent(nestedRelPath)
-                        let relPath = projectRelativePath(fullPath, projectPath: projectPath)
-                        installedHashes[relPath] = hash
-                    }
-                } catch {
-                    output.warn("Could not compute hashes for \(destination): \(error.localizedDescription)")
+                let hashResult = try FileHasher.directoryFileHashes(at: destURL)
+                for (nestedRelPath, hash) in hashResult.hashes {
+                    let fullPath = destURL.appendingPathComponent(nestedRelPath)
+                    let relPath = projectRelativePath(fullPath, projectPath: projectPath)
+                    installedHashes[relPath] = hash
+                }
+                for (failedPath, error) in hashResult.failures {
+                    output.warn("Could not compute hash for \(failedPath): \(error.localizedDescription)")
                 }
             } else {
                 if fm.fileExists(atPath: destURL.path) {
