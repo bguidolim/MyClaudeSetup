@@ -155,8 +155,12 @@ struct FileContentCheck: DoctorCheck {
     let expectedHash: String
 
     func check() -> CheckResult {
-        guard FileManager.default.fileExists(atPath: path.path) else {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDir) else {
             return .skip("missing (checked separately)")
+        }
+        if isDir.boolValue {
+            return .skip("directory (contents checked individually)")
         }
         do {
             let currentHash = try FileHasher.sha256(of: path)

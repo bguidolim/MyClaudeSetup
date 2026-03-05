@@ -12,9 +12,16 @@ enum FileHasher {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Result of hashing all files in a directory, with per-file error resilience.
+    struct DirectoryHashResult: Sendable {
+        let hashes: [(relativePath: String, hash: String)]
+        let failures: [(relativePath: String, error: any Error)]
+    }
+
     /// Compute SHA-256 hashes for all regular files in a directory (recursive).
-    /// Returns sorted (relativePath, hash) pairs where relativePath is relative to the directory.
-    static func directoryFileHashes(at url: URL) throws -> [(relativePath: String, hash: String)] {
+    /// Per-file errors are collected in `failures` rather than aborting the whole operation.
+    /// Throws only if the directory itself cannot be enumerated.
+    static func directoryFileHashes(at url: URL) throws -> DirectoryHashResult {
         let fm = FileManager.default
         // Resolve symlinks to ensure consistent path comparison
         // (macOS /var → /private/var, /tmp → /private/tmp)
@@ -31,15 +38,24 @@ enum FileHasher {
         }
 
         var results: [(relativePath: String, hash: String)] = []
+        var failures: [(relativePath: String, error: any Error)] = []
         let basePath = resolvedURL.path
         while let fileURL = enumerator.nextObject() as? URL {
             let resolvedFile = fileURL.resolvingSymlinksInPath()
-            let resourceValues = try resolvedFile.resourceValues(forKeys: [.isRegularFileKey])
-            guard resourceValues.isRegularFile == true else { continue }
-            let relativePath = PathContainment.relativePath(of: resolvedFile.path, within: basePath)
-            let hash = try sha256(of: resolvedFile)
-            results.append((relativePath, hash))
+            do {
+                let resourceValues = try resolvedFile.resourceValues(forKeys: [.isRegularFileKey])
+                guard resourceValues.isRegularFile == true else { continue }
+                let relativePath = PathContainment.relativePath(of: resolvedFile.path, within: basePath)
+                let hash = try sha256(of: resolvedFile)
+                results.append((relativePath, hash))
+            } catch {
+                let relativePath = PathContainment.relativePath(of: resolvedFile.path, within: basePath)
+                failures.append((relativePath, error))
+            }
         }
-        return results.sorted { $0.relativePath < $1.relativePath }
+        return DirectoryHashResult(
+            hashes: results.sorted { $0.relativePath < $1.relativePath },
+            failures: failures
+        )
     }
 }
