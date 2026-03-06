@@ -154,6 +154,11 @@ swiftlint --fix
 - Tests construct all state inline; no external fixtures or shared setup
 - **Important**: `swift test` output does not display in Claude Code's terminal. Redirect to a file and read it: `swift test > .test-output/results.txt 2>&1` then read `.test-output/results.txt`
 
+## Git
+
+- **Never amend commits** — always create new commits so the change history stays trackable
+- **Never force-push** — use regular `git push` only
+
 ## Key Design Decisions
 
 - **Pure engine, zero bundled content**: `mcs` ships no templates, hooks, settings, or skills — all features come from external packs users add via `mcs pack add`
