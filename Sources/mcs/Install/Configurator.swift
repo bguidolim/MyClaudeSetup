@@ -280,38 +280,28 @@ struct Configurator {
             registry: registry
         )
         for package in artifacts.brewPackages {
-            if refCounter.isStillNeeded(
-                .brewPackage(package),
-                excludingScope: excludeScope,
-                excludingPack: packID
+            if case .removed = removeBrewArtifact(
+                package, exec: exec, refCounter: refCounter,
+                excludingScope: excludeScope, excludingPack: packID
             ) {
-                output.dimmed("  Keeping brew package '\(package)' — still needed by another scope")
-            } else {
-                if exec.uninstallBrewPackage(package) {
-                    output.dimmed("  Removed brew package: \(package)")
-                }
+                output.dimmed("  Removed brew package: \(package)")
             }
         }
         remaining.brewPackages = []
 
         for pluginName in artifacts.plugins {
-            if refCounter.isStillNeeded(
-                .plugin(pluginName),
-                excludingScope: excludeScope,
-                excludingPack: packID
+            if case .removed = removePluginArtifact(
+                pluginName, exec: exec, refCounter: refCounter,
+                excludingScope: excludeScope, excludingPack: packID
             ) {
-                output.dimmed("  Keeping plugin '\(PluginRef(pluginName).bareName)' — still needed by another scope")
-            } else {
-                if exec.removePlugin(pluginName) {
-                    output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)")
-                }
+                output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)")
             }
         }
         remaining.plugins = []
 
         // Remove MCP servers
         for server in artifacts.mcpServers
-            where exec.removeMCPServer(name: server.name, scope: server.scope) {
+            where removeMCPServerArtifact(server, exec: exec) {
             removedServers.insert(server)
             output.dimmed("  Removed MCP server: \(server.name)")
         }
@@ -320,7 +310,7 @@ struct Configurator {
         // Remove files via strategy (project vs global have different removal logic)
         var removedFiles: Set<String> = []
         for path in artifacts.files
-            where strategy.removeFileArtifact(relativePath: path, output: output) {
+            where removeFileArtifactItem(relativePath: path) {
             removedFiles.insert(path)
         }
         remaining.files.removeAll { removedFiles.contains($0) }
@@ -403,14 +393,10 @@ struct Configurator {
         if !artifacts.gitignoreEntries.isEmpty {
             let gitignoreManager = GitignoreManager(shell: shell)
             var removedEntries: Set<String> = []
-            for entry in artifacts.gitignoreEntries {
-                do {
-                    try gitignoreManager.removeEntry(entry)
-                    removedEntries.insert(entry)
-                    output.dimmed("  Removed gitignore entry: \(entry)")
-                } catch {
-                    output.warn("Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
-                }
+            for entry in artifacts.gitignoreEntries
+                where removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
+                removedEntries.insert(entry)
+                output.dimmed("  Removed gitignore entry: \(entry)")
             }
             remaining.gitignoreEntries.removeAll { removedEntries.contains($0) }
         }
@@ -457,7 +443,8 @@ struct Configurator {
                 switch component.installAction {
                 case let .mcpServer(config):
                     let serverScope = scope.mcpScopeOverride ?? config.resolvedScope
-                    if exec.removeMCPServer(name: config.name, scope: serverScope) {
+                    let ref = MCPServerRef(name: config.name, scope: serverScope)
+                    if removeMCPServerArtifact(ref, exec: exec) {
                         artifacts.mcpServers.removeAll { $0.name == config.name }
                         output.dimmed("  Removed MCP server: \(config.name)")
                     } else {
@@ -468,7 +455,7 @@ struct Configurator {
                     let relativePath = deriveFileRelativePath(
                         destination: destination, fileType: fileType
                     )
-                    if strategy.removeFileArtifact(relativePath: relativePath, output: output) {
+                    if removeFileArtifactItem(relativePath: relativePath) {
                         artifacts.files.removeAll { $0 == relativePath }
                         artifacts.fileHashes.removeValue(forKey: relativePath)
                     } else {
@@ -482,43 +469,43 @@ struct Configurator {
                     }
 
                 case let .brewInstall(package):
-                    if refCounter.isStillNeeded(
-                        .brewPackage(package),
+                    let result = removeBrewArtifact(
+                        package, exec: exec, refCounter: refCounter,
                         excludingScope: scope.scopeIdentifier,
                         excludingPack: pack.identifier
-                    ) {
-                        output.dimmed("  Keeping brew package '\(package)' — still needed by another scope")
-                    } else if exec.uninstallBrewPackage(package) {
+                    )
+                    switch result {
+                    case .removed:
                         artifacts.brewPackages.removeAll { $0 == package }
                         output.dimmed("  Removed brew package: \(package)")
-                    } else {
+                    case .stillNeeded:
+                        break
+                    case .failed:
                         output.warn("  Could not remove brew package '\(package)' — will retry on next sync")
                     }
 
                 case let .plugin(name):
-                    if refCounter.isStillNeeded(
-                        .plugin(name),
+                    let result = removePluginArtifact(
+                        name, exec: exec, refCounter: refCounter,
                         excludingScope: scope.scopeIdentifier,
                         excludingPack: pack.identifier
-                    ) {
-                        output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope")
-                    } else if exec.removePlugin(name) {
+                    )
+                    switch result {
+                    case .removed:
                         artifacts.plugins.removeAll { $0 == name }
                         output.dimmed("  Removed plugin: \(PluginRef(name).bareName)")
-                    } else {
+                    case .stillNeeded:
+                        break
+                    case .failed:
                         output.warn("  Could not remove plugin '\(PluginRef(name).bareName)' — will retry on next sync")
                     }
 
                 case let .gitignoreEntries(entries):
                     let gitignoreManager = GitignoreManager(shell: shell)
-                    for entry in entries {
-                        do {
-                            try gitignoreManager.removeEntry(entry)
-                            artifacts.gitignoreEntries.removeAll { $0 == entry }
-                            output.dimmed("  Removed gitignore entry: \(entry)")
-                        } catch {
-                            output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
-                        }
+                    for entry in entries
+                        where removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
+                        artifacts.gitignoreEntries.removeAll { $0 == entry }
+                        output.dimmed("  Removed gitignore entry: \(entry)")
                     }
 
                 case .shellCommand, .settingsMerge:
@@ -741,7 +728,7 @@ struct Configurator {
         // MCP servers (catches both removals and scope changes — MCPServerRef hashes on name+scope)
         let staleMCPs = Set(previous.mcpServers).subtracting(currentArtifacts.mcpServers)
         for server in staleMCPs {
-            if exec.removeMCPServer(name: server.name, scope: server.scope) {
+            if removeMCPServerArtifact(server, exec: exec) {
                 output.dimmed("  Removed stale MCP server: \(server.name) (scope: \(server.scope))")
             } else {
                 currentArtifacts.mcpServers.append(server)
@@ -752,7 +739,7 @@ struct Configurator {
         // Files (also reconcile fileHashes to prevent stale content-drift warnings)
         let staleFiles = Set(previous.files).subtracting(currentArtifacts.files)
         for path in staleFiles {
-            if strategy.removeFileArtifact(relativePath: path, output: output) {
+            if removeFileArtifactItem(relativePath: path) {
                 currentArtifacts.fileHashes.removeValue(forKey: path)
                 output.dimmed("  Removed stale file: \(path)")
             } else {
@@ -769,12 +756,11 @@ struct Configurator {
         if !staleGitignore.isEmpty {
             let gitignoreManager = GitignoreManager(shell: shell)
             for entry in staleGitignore {
-                do {
-                    try gitignoreManager.removeEntry(entry)
+                if removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
                     output.dimmed("  Removed stale gitignore entry: \(entry)")
-                } catch {
+                } else {
+                    // Helper already warned — re-add for retry on next sync
                     currentArtifacts.gitignoreEntries.append(entry)
-                    output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
                 }
             }
         }
@@ -787,29 +773,31 @@ struct Configurator {
                 environment: environment, output: output, registry: registry
             )
             for package in staleBrew {
-                if refCounter.isStillNeeded(
-                    .brewPackage(package),
-                    excludingScope: scope.scopeIdentifier,
-                    excludingPack: packID
-                ) {
-                    output.dimmed("  Keeping brew package '\(package)' — still needed by another scope")
-                } else if exec.uninstallBrewPackage(package) {
+                let result = removeBrewArtifact(
+                    package, exec: exec, refCounter: refCounter,
+                    excludingScope: scope.scopeIdentifier, excludingPack: packID
+                )
+                switch result {
+                case .removed:
                     output.dimmed("  Removed stale brew package: \(package)")
-                } else {
+                case .stillNeeded:
+                    break
+                case .failed:
                     currentArtifacts.brewPackages.append(package)
                     output.warn("  Could not remove stale brew package '\(package)' — will retry on next sync")
                 }
             }
             for name in stalePlugins {
-                if refCounter.isStillNeeded(
-                    .plugin(name),
-                    excludingScope: scope.scopeIdentifier,
-                    excludingPack: packID
-                ) {
-                    output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope")
-                } else if exec.removePlugin(name) {
+                let result = removePluginArtifact(
+                    name, exec: exec, refCounter: refCounter,
+                    excludingScope: scope.scopeIdentifier, excludingPack: packID
+                )
+                switch result {
+                case .removed:
                     output.dimmed("  Removed stale plugin: \(PluginRef(name).bareName)")
-                } else {
+                case .stillNeeded:
+                    break
+                case .failed:
                     currentArtifacts.plugins.append(name)
                     output.warn("  Could not remove stale plugin '\(PluginRef(name).bareName)' — will retry on next sync")
                 }
@@ -865,6 +853,100 @@ struct Configurator {
                     state.setArtifacts(artifacts, for: pack.identifier)
                 }
             }
+        }
+    }
+
+    // MARK: - Artifact Removal Helpers
+
+    /// Result of attempting to remove a ref-counted resource (brew package or plugin).
+    private enum RefCountedRemovalResult {
+        /// Resource was successfully uninstalled.
+        case removed
+        /// Resource is still needed by another scope; it was not uninstalled.
+        case stillNeeded
+        /// Removal was attempted but failed.
+        case failed
+    }
+
+    /// Remove a single MCP server.
+    /// - Returns: `true` if the server was successfully removed.
+    private func removeMCPServerArtifact(
+        _ server: MCPServerRef,
+        exec: ComponentExecutor
+    ) -> Bool {
+        exec.removeMCPServer(name: server.name, scope: server.scope)
+    }
+
+    /// Remove a single file artifact via strategy.
+    /// - Returns: `true` if the file was successfully removed or already absent.
+    private func removeFileArtifactItem(relativePath: String) -> Bool {
+        strategy.removeFileArtifact(relativePath: relativePath, output: output)
+    }
+
+    /// Remove a brew package with reference counting.
+    ///
+    /// Logs the "Keeping" message when the package is still needed by another scope.
+    /// Callers provide their own success/failure context messages.
+    private func removeBrewArtifact(
+        _ package: String,
+        exec: ComponentExecutor,
+        refCounter: ResourceRefCounter,
+        excludingScope: String,
+        excludingPack: String
+    ) -> RefCountedRemovalResult {
+        if refCounter.isStillNeeded(
+            .brewPackage(package),
+            excludingScope: excludingScope,
+            excludingPack: excludingPack
+        ) {
+            output.dimmed("  Keeping brew package '\(package)' — still needed by another scope")
+            return .stillNeeded
+        }
+        if exec.uninstallBrewPackage(package) {
+            return .removed
+        }
+        return .failed
+    }
+
+    /// Remove a plugin with reference counting.
+    ///
+    /// Logs the "Keeping" message when the plugin is still needed by another scope.
+    /// Callers provide their own success/failure context messages.
+    private func removePluginArtifact(
+        _ name: String,
+        exec: ComponentExecutor,
+        refCounter: ResourceRefCounter,
+        excludingScope: String,
+        excludingPack: String
+    ) -> RefCountedRemovalResult {
+        if refCounter.isStillNeeded(
+            .plugin(name),
+            excludingScope: excludingScope,
+            excludingPack: excludingPack
+        ) {
+            output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope")
+            return .stillNeeded
+        }
+        if exec.removePlugin(name) {
+            return .removed
+        }
+        return .failed
+    }
+
+    /// Remove a single gitignore entry, absorbing the do/catch.
+    ///
+    /// Logs a warning on failure. Callers handle success logging with their own context.
+    /// - Returns: `true` if the entry was successfully removed.
+    private func removeGitignoreArtifact(
+        _ entry: String,
+        gitignoreManager: GitignoreManager
+    ) -> Bool {
+        do {
+            try gitignoreManager.removeEntry(entry)
+            return true
+        } catch {
+            output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
+            return false
         }
     }
 
