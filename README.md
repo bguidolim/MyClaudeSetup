@@ -28,6 +28,8 @@ brew install bguidolim/tap/managed-claude-stack
 ### 2. Add tech packs
 
 ```bash
+# this is a real tech pack as example
+# more info about tech packs: https://github.com/bguidolim/mcs?tab=readme-ov-file#-whats-in-a-tech-pack
 mcs pack add bguidolim/mcs-continuous-learning
 ```
 
