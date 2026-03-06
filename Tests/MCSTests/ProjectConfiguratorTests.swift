@@ -1658,7 +1658,6 @@ struct CorruptStateAbortTests {
     }
 }
 
-
 // MARK: - parseRepoName Tests
 
 struct ParseRepoNameTests {
