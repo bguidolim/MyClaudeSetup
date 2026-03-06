@@ -759,6 +759,7 @@ struct Configurator {
                 if removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
                     output.dimmed("  Removed stale gitignore entry: \(entry)")
                 } else {
+                    // Helper already warned — re-add for retry on next sync
                     currentArtifacts.gitignoreEntries.append(entry)
                 }
             }
@@ -861,7 +862,7 @@ struct Configurator {
     private enum RefCountedRemovalResult {
         /// Resource was successfully uninstalled.
         case removed
-        /// Resource is still needed by another scope — safe to clear from this pack's record.
+        /// Resource is still needed by another scope; it was not uninstalled.
         case stillNeeded
         /// Removal was attempted but failed.
         case failed
@@ -885,7 +886,7 @@ struct Configurator {
     /// Remove a brew package with reference counting.
     ///
     /// Logs the "Keeping" message when the package is still needed by another scope.
-    /// Callers handle success/failure logging with their own context.
+    /// Callers provide their own success/failure context messages.
     private func removeBrewArtifact(
         _ package: String,
         exec: ComponentExecutor,
@@ -910,7 +911,7 @@ struct Configurator {
     /// Remove a plugin with reference counting.
     ///
     /// Logs the "Keeping" message when the plugin is still needed by another scope.
-    /// Callers handle success/failure logging with their own context.
+    /// Callers provide their own success/failure context messages.
     private func removePluginArtifact(
         _ name: String,
         exec: ComponentExecutor,
