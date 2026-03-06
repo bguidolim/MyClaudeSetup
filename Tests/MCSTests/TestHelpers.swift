@@ -121,3 +121,36 @@ final class TrackingMockTechPack: TechPack, @unchecked Sendable {
         configureProjectCallCount += 1
     }
 }
+
+// MARK: - Global Test Helpers
+
+/// Create a temp directory pre-configured for global-scope tests (`.claude/` + `.mcs/` subdirectories).
+func makeGlobalTmpDir(label: String = "global") throws -> URL {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("mcs-\(label)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+        at: dir.appendingPathComponent(Constants.FileNames.claudeDirectory),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: dir.appendingPathComponent(".mcs"),
+        withIntermediateDirectories: true
+    )
+    return dir
+}
+
+/// Create a `Configurator` configured for global-scope sync.
+func makeGlobalConfigurator(
+    home: URL,
+    mockCLI: MockClaudeCLI = MockClaudeCLI()
+) -> Configurator {
+    let env = Environment(home: home)
+    return Configurator(
+        environment: env,
+        output: CLIOutput(colorsEnabled: false),
+        shell: ShellRunner(environment: env),
+        strategy: GlobalSyncStrategy(environment: env),
+        claudeCLI: mockCLI
+    )
+}

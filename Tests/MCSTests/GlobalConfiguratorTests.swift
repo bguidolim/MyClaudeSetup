@@ -5,43 +5,13 @@ import Testing
 // MARK: - Global MCP Scope Tests
 
 struct GlobalMCPScopeTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-mcp-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Create required subdirectories for global scope
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(
-        home: URL,
-        mockCLI: MockClaudeCLI = MockClaudeCLI()
-    ) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: mockCLI
-        )
-    }
-
     @Test("MCP server is registered with user scope regardless of pack declaration")
     func mcpServerUsesUserScope() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir(label: "mcp")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -63,16 +33,16 @@ struct GlobalMCPScopeTests {
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         #expect(mockCLI.mcpAddCalls.count == 1)
-        #expect(mockCLI.mcpAddCalls.first?.scope == "user")
+        #expect(mockCLI.mcpAddCalls.first?.scope == Constants.MCPScope.user)
     }
 
     @Test("MCP scope override ignores explicit local scope in pack config")
     func mcpScopeOverrideIgnoresLocalDeclaration() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -94,15 +64,15 @@ struct GlobalMCPScopeTests {
 
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
-        #expect(mockCLI.mcpAddCalls.first?.scope == "user")
+        #expect(mockCLI.mcpAddCalls.first?.scope == Constants.MCPScope.user)
     }
 
     @Test("Artifact record stores user scope for MCP server")
     func mcpArtifactRecordsUserScope() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -126,17 +96,17 @@ struct GlobalMCPScopeTests {
         let env = Environment(home: tmpDir)
         let state = try ProjectState(stateFile: env.globalStateFile)
         let artifacts = state.artifacts(for: "test-pack")
-        #expect(artifacts?.mcpServers.first?.scope == "user")
+        #expect(artifacts?.mcpServers.first?.scope == Constants.MCPScope.user)
         #expect(artifacts?.mcpServers.first?.name == "my-mcp")
     }
 
     @Test("Stale MCP server is removed with user scope")
     func staleMCPRemovedWithUserScope() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         // Pack v1: two MCP servers
         let packV1 = MockTechPack(
@@ -196,7 +166,7 @@ struct GlobalMCPScopeTests {
         try configurator.configure(packs: [packV2], confirmRemovals: false)
 
         #expect(mockCLI.mcpRemoveCalls.contains(
-            MockClaudeCLI.MCPRemoveCall(name: "mcp-drop", scope: "user")
+            MockClaudeCLI.MCPRemoveCall(name: "mcp-drop", scope: Constants.MCPScope.user)
         ))
     }
 }
@@ -204,38 +174,9 @@ struct GlobalMCPScopeTests {
 // MARK: - Global Settings Composition Tests
 
 struct GlobalSettingsCompositionTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-settings-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(
-        home: URL,
-        mockCLI: MockClaudeCLI = MockClaudeCLI()
-    ) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: mockCLI
-        )
-    }
-
     @Test("Existing user settings are preserved after global sync")
     func preservesExistingUserSettings() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         // Pre-write settings.json with user content
@@ -245,7 +186,7 @@ struct GlobalSettingsCompositionTests {
         """
         try userSettings.write(to: settingsPath, atomically: true, encoding: .utf8)
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         // Pack with a hook file that will add hooks to settings
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
@@ -289,10 +230,10 @@ struct GlobalSettingsCompositionTests {
 
     @Test("Managed hooks are stripped before recompose to prevent duplication")
     func stripsMangedHooksBeforeRecompose() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
@@ -333,13 +274,13 @@ struct GlobalSettingsCompositionTests {
 
     @Test("Corrupt settings.json throws fileOperationFailed")
     func corruptJSONThrows() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let settingsPath = tmpDir.appendingPathComponent(".claude/settings.json")
         try "{ invalid json".write(to: settingsPath, atomically: true, encoding: .utf8)
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         let pack = MockTechPack(
             identifier: "test-pack",
             displayName: "Test Pack",
@@ -360,20 +301,23 @@ struct GlobalSettingsCompositionTests {
             )]
         )
 
-        #expect(throws: MCSError.self) {
+        #expect {
             try configurator.configure(packs: [pack], confirmRemovals: false)
+        } throws: { error in
+            guard case MCSError.fileOperationFailed = error else { return false }
+            return true
         }
     }
 
     @Test("Empty packs do not delete settings.json")
     func emptyPacksDoNotDeleteSettingsJSON() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let settingsPath = tmpDir.appendingPathComponent(".claude/settings.json")
         try "{}".write(to: settingsPath, atomically: true, encoding: .utf8)
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         let pack = MockTechPack(
             identifier: "test-pack",
             displayName: "Test Pack"
@@ -386,10 +330,10 @@ struct GlobalSettingsCompositionTests {
 
     @Test("Hook commands use global path prefix")
     func hookCommandPrefixUsesGlobalPath() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
@@ -430,35 +374,9 @@ struct GlobalSettingsCompositionTests {
 // MARK: - Global Claude Composition Tests
 
 struct GlobalClaudeCompositionTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-claude-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(home: URL) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: MockClaudeCLI()
-        )
-    }
-
     @Test("Template sections are written to global CLAUDE.md")
     func composesToGlobalClaudeMD() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -471,7 +389,7 @@ struct GlobalClaudeCompositionTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let claudePath = tmpDir.appendingPathComponent(".claude/CLAUDE.md")
@@ -483,7 +401,7 @@ struct GlobalClaudeCompositionTests {
 
     @Test("Empty contributions do not create CLAUDE.md")
     func emptyContributionsSilent() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -491,7 +409,7 @@ struct GlobalClaudeCompositionTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let claudePath = tmpDir.appendingPathComponent(".claude/CLAUDE.md")
@@ -500,7 +418,7 @@ struct GlobalClaudeCompositionTests {
 
     @Test("Existing user content in CLAUDE.md is preserved on re-sync")
     func existingUserContentPreserved() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         // First sync: install a section so the file has markers
@@ -514,7 +432,7 @@ struct GlobalClaudeCompositionTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Simulate user appending custom content outside section markers
@@ -534,7 +452,7 @@ struct GlobalClaudeCompositionTests {
 
     @Test("Template sections are tracked in artifact record")
     func templateSectionsTracked() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -547,7 +465,7 @@ struct GlobalClaudeCompositionTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -560,38 +478,9 @@ struct GlobalClaudeCompositionTests {
 // MARK: - Global File Installation Tests
 
 struct GlobalFileInstallationTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-files-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(
-        home: URL,
-        mockCLI: MockClaudeCLI = MockClaudeCLI()
-    ) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: mockCLI
-        )
-    }
-
     @Test("Skill file installed to global skills directory")
     func skillInstalledToGlobalDir() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let sourceDir = tmpDir.appendingPathComponent("pack/skills")
@@ -614,7 +503,7 @@ struct GlobalFileInstallationTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let dest = tmpDir.appendingPathComponent(".claude/skills/my-skill.md")
@@ -623,7 +512,7 @@ struct GlobalFileInstallationTests {
 
     @Test("Hook file installed to global hooks directory")
     func hookInstalledToGlobalDir() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let sourceDir = tmpDir.appendingPathComponent("pack/hooks")
@@ -646,7 +535,7 @@ struct GlobalFileInstallationTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let dest = tmpDir.appendingPathComponent(".claude/hooks/start.sh")
@@ -655,7 +544,7 @@ struct GlobalFileInstallationTests {
 
     @Test("File path recorded relative to claude directory")
     func filePathRecordedRelativeToClaudeDir() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let sourceDir = tmpDir.appendingPathComponent("pack/skills")
@@ -678,7 +567,7 @@ struct GlobalFileInstallationTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -689,7 +578,7 @@ struct GlobalFileInstallationTests {
 
     @Test("Stale file removed from global directory")
     func staleFileRemovedFromGlobalDir() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let sourceDir = tmpDir.appendingPathComponent("pack/skills")
@@ -726,7 +615,7 @@ struct GlobalFileInstallationTests {
             ]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [packV1], confirmRemovals: false)
 
         let destB = tmpDir.appendingPathComponent(".claude/skills/skill-b.md")
@@ -776,35 +665,9 @@ struct GlobalResolveBuiltInValuesTests {
 // MARK: - Global Convergence Flow Tests
 
 struct GlobalConvergenceFlowTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-flow-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(home: URL) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: MockClaudeCLI()
-        )
-    }
-
     @Test("configureProject hooks are NOT called in global scope")
     func configureProjectHooksNotCalled() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = TrackingMockTechPack(
@@ -812,7 +675,7 @@ struct GlobalConvergenceFlowTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         #expect(pack.configureProjectCallCount == 0)
@@ -822,42 +685,13 @@ struct GlobalConvergenceFlowTests {
 // MARK: - Global Unconfigure Pack Tests
 
 struct GlobalUnconfigurePackTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-unconfig-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(
-        home: URL,
-        mockCLI: MockClaudeCLI = MockClaudeCLI()
-    ) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: mockCLI
-        )
-    }
-
     @Test("unconfigurePack removes MCP server with user scope")
     func unconfigureRemovesMCPWithUserScope() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -884,13 +718,13 @@ struct GlobalUnconfigurePackTests {
         try configurator.configure(packs: [], confirmRemovals: false)
 
         #expect(mockCLI.mcpRemoveCalls.contains(
-            MockClaudeCLI.MCPRemoveCall(name: "my-mcp", scope: "user")
+            MockClaudeCLI.MCPRemoveCall(name: "my-mcp", scope: Constants.MCPScope.user)
         ))
     }
 
     @Test("unconfigurePack removes files from global directory")
     func unconfigureRemovesFilesFromGlobalDir() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let sourceDir = tmpDir.appendingPathComponent("pack/skills")
@@ -913,7 +747,7 @@ struct GlobalUnconfigurePackTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let dest = tmpDir.appendingPathComponent(".claude/skills/my-skill.md")
@@ -927,7 +761,7 @@ struct GlobalUnconfigurePackTests {
 
     @Test("unconfigurePack strips template sections from CLAUDE.md")
     func unconfigureStripsTemplateSections() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -940,7 +774,7 @@ struct GlobalUnconfigurePackTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let claudePath = tmpDir.appendingPathComponent(".claude/CLAUDE.md")
@@ -957,10 +791,10 @@ struct GlobalUnconfigurePackTests {
 
     @Test("unconfigurePack strips settings keys from settings.json")
     func unconfigureStripsSettingsKeys() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
@@ -1004,11 +838,11 @@ struct GlobalUnconfigurePackTests {
 
     @Test("Deselection of one pack fully unconfigures it while keeping the other")
     func deselectionTriggersUnconfigure() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let packA = MockTechPack(
             identifier: "pack-a",
@@ -1053,11 +887,11 @@ struct GlobalUnconfigurePackTests {
 
         // pack-a's MCP should be removed
         #expect(mockCLI.mcpRemoveCalls.contains(
-            MockClaudeCLI.MCPRemoveCall(name: "mcp-a", scope: "user")
+            MockClaudeCLI.MCPRemoveCall(name: "mcp-a", scope: Constants.MCPScope.user)
         ))
         // pack-b's MCP should NOT be removed
         #expect(!mockCLI.mcpRemoveCalls.contains(
-            MockClaudeCLI.MCPRemoveCall(name: "mcp-b", scope: "user")
+            MockClaudeCLI.MCPRemoveCall(name: "mcp-b", scope: Constants.MCPScope.user)
         ))
 
         let env = Environment(home: tmpDir)
@@ -1070,35 +904,9 @@ struct GlobalUnconfigurePackTests {
 // MARK: - Global Dry Run Tests
 
 struct GlobalDryRunTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-dryrun-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(home: URL) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: MockClaudeCLI()
-        )
-    }
-
     @Test("Dry run does not create any files in global scope")
     func dryRunNoFilesCreated() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -1123,7 +931,7 @@ struct GlobalDryRunTests {
             )]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.dryRun(packs: [pack])
 
         // No state file should be created
@@ -1137,10 +945,10 @@ struct GlobalDryRunTests {
 
     @Test("Dry run preserves existing global state")
     func dryRunPreservesState() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         // Install a pack first
         let packA = MockTechPack(
@@ -1182,42 +990,13 @@ struct GlobalDryRunTests {
 // MARK: - Global Excluded Components Tests
 
 struct GlobalExcludedComponentsTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-exclude-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(
-        home: URL,
-        mockCLI: MockClaudeCLI = MockClaudeCLI()
-    ) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: mockCLI
-        )
-    }
-
     @Test("Excluded MCP server is removed with user scope")
     func excludedMCPRemovedWithUserScope() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -1262,13 +1041,13 @@ struct GlobalExcludedComponentsTests {
         )
 
         #expect(mockCLI.mcpRemoveCalls.contains(
-            MockClaudeCLI.MCPRemoveCall(name: "mcp-b", scope: "user")
+            MockClaudeCLI.MCPRemoveCall(name: "mcp-b", scope: Constants.MCPScope.user)
         ))
     }
 
     @Test("Excluded file is removed from global directory")
     func excludedFileRemovedFromGlobalDir() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let sourceDir = tmpDir.appendingPathComponent("pack/skills")
@@ -1305,7 +1084,7 @@ struct GlobalExcludedComponentsTests {
             ]
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
 
         // First sync: both installed
         try configurator.configure(packs: [pack], confirmRemovals: false)
@@ -1329,35 +1108,9 @@ struct GlobalExcludedComponentsTests {
 // MARK: - Global State and Index Tests
 
 struct GlobalStateAndIndexTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-global-state-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        return dir
-    }
-
-    private func makeConfigurator(home: URL) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
-            strategy: GlobalSyncStrategy(environment: env),
-            claudeCLI: MockClaudeCLI()
-        )
-    }
-
     @Test("State file saved to global location")
     func stateFileSavedToGlobalLocation() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -1365,7 +1118,7 @@ struct GlobalStateAndIndexTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -1374,7 +1127,7 @@ struct GlobalStateAndIndexTests {
 
     @Test("Project index uses global sentinel identifier")
     func projectIndexUsesGlobalSentinel() throws {
-        let tmpDir = try makeTmpDir()
+        let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let pack = MockTechPack(
@@ -1382,7 +1135,7 @@ struct GlobalStateAndIndexTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeConfigurator(home: tmpDir)
+        let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
