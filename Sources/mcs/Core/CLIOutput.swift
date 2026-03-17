@@ -92,7 +92,7 @@ struct CLIOutput: Sendable {
     /// Counts visual terminal rows for a rendered output string,
     /// accounting for lines that wrap past `columns`.
     private func visualRowCount(of output: String, columns: Int) -> Int {
-        guard columns > 0 else { return output.filter { $0 == "\n" }.count }
+        guard columns > 0 else { return output.count(where: { $0 == "\n" }) }
 
         var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
         if lines.last?.isEmpty == true { lines.removeLast() }
