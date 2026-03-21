@@ -235,6 +235,44 @@ enum ConfiguratorSupport {
         return (hasContent, contributedKeys)
     }
 
+    /// Compute per-pack SHA-256 hashes of contributed settings values from the on-disk file.
+    ///
+    /// Reads the settings file once and hashes each pack's key-value pairs independently.
+    /// Returns an empty dictionary if no content was written or the file cannot be read.
+    static func computeSettingsHashes(
+        hasContent: Bool,
+        contributedKeys: [String: [String]],
+        settingsPath: URL,
+        output: CLIOutput
+    ) -> [String: String] {
+        guard hasContent else { return [:] }
+        let savedData: Data
+        do {
+            savedData = try Data(contentsOf: settingsPath)
+        } catch {
+            output.warn("Could not read settings for drift hash: \(error.localizedDescription)")
+            return [:]
+        }
+        let savedJSON: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: savedData) as? [String: Any] else {
+                output.warn("Settings file is not a JSON object — skipping drift hash")
+                return [:]
+            }
+            savedJSON = parsed
+        } catch {
+            output.warn("Could not parse settings for drift hash: \(error.localizedDescription)")
+            return [:]
+        }
+        var hashes: [String: String] = [:]
+        for (packID, keys) in contributedKeys {
+            if let hash = SettingsHasher.hash(keyPaths: keys, in: savedJSON) {
+                hashes[packID] = hash
+            }
+        }
+        return hashes
+    }
+
     // MARK: - Repo Name Parsing
 
     /// Parse the repository name from a git remote URL.

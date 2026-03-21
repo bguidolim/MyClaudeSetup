@@ -67,6 +67,7 @@ mcs export <dir> --dry-run       # Preview what would be exported
 - `Homebrew.swift` — brew detection, package install/uninstall
 - `Lockfile.swift` — `mcs.lock.yaml` model for pinning pack commits
 - `ProjectDetector.swift` — walk-up project root detection (`.git/` or `CLAUDE.local.md`)
+- `SettingsHasher.swift` — deterministic SHA-256 hashing of per-pack settings key-value pairs for drift detection
 - `ProjectState.swift` — per-project `.claude/.mcs-project` JSON state (configured packs, per-pack `PackArtifactRecord` with ownership tracking, version)
 - `ProjectIndex.swift` — cross-project index (`~/.mcs/projects.yaml`) mapping project paths to pack IDs for reference counting
 - `MCSError.swift` — error types for the CLI
@@ -92,7 +93,7 @@ mcs export <dir> --dry-run       # Preview what would be exported
 
 ### Doctor (`Sources/mcs/Doctor/`)
 - `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution
-- `CoreDoctorChecks.swift` — check structs (CommandCheck, MCPServerCheck, PluginCheck, HookCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, ProjectIndexCheck)
+- `CoreDoctorChecks.swift` — check structs (CommandCheck, MCPServerCheck, PluginCheck, HookCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
 - `DerivedDoctorChecks.swift` — `deriveDoctorCheck()` extension on ComponentDefinition
 - `ProjectDoctorChecks.swift` — project-scoped checks (CLAUDE.local.md freshness, state file)
 - `SectionValidator.swift` — validation of CLAUDE.local.md section markers
@@ -166,7 +167,7 @@ swiftlint --fix
 - **`mcs sync` is the primary command**: per-project multi-select of registered packs, fully idempotent convergence (add/remove/update), per-project artifact placement. `--global` flag handles global-scope install
 - **Per-project artifacts**: skills, hooks, commands, and `settings.local.json` go to `<project>/.claude/`; only brew packages and plugins are global
 - **MCP scope defaults to `local`**: per-user, per-project isolation via `claude mcp add -s local` (stored in `~/.claude.json` keyed by project path)
-- **Convergent sync**: `ProjectState` records per-pack `PackArtifactRecord` (MCP servers, files, template sections, hook commands, settings keys, brew packages, plugins, gitignore entries); re-running converges to desired state by diffing previous vs. selected packs. `mcs pack remove` discovers all scopes via `ProjectIndex` and runs the same `unconfigurePack()` convergence for each
+- **Convergent sync**: `ProjectState` records per-pack `PackArtifactRecord` (MCP servers, files, template sections, hook commands, settings keys, settings hash, brew packages, plugins, gitignore entries, file hashes); re-running converges to desired state by diffing previous vs. selected packs. `mcs pack remove` discovers all scopes via `ProjectIndex` and runs the same `unconfigurePack()` convergence for each
 - **External pack protocol**: `TechPack` protocol with `ExternalPackAdapter` bridging YAML manifests (`techpack.yaml`) to the same install/doctor/sync flows
 - **Section markers**: composed files use `<!-- mcs:begin/end -->` HTML comments to separate tool-managed content from user content
 - **Settings composition**: each pack's hook entries compose into `<project>/.claude/settings.local.json` as individual `HookGroup` entries

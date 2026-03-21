@@ -448,6 +448,17 @@ struct DoctorRunner {
                     ),
                     isExcluded: false
                 ))
+                if let expectedHash = artifacts.settingsHash {
+                    checks.append((
+                        check: SettingsDriftCheck(
+                            keys: artifacts.settingsKeys,
+                            expectedHash: expectedHash,
+                            settingsPath: settingsPath,
+                            packName: pack.displayName
+                        ),
+                        isExcluded: false
+                    ))
+                }
             }
         }
 

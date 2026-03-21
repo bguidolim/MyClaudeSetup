@@ -395,10 +395,7 @@ struct SettingsKeysCheck: DoctorCheck {
         } catch {
             return .fail("settings file contains invalid JSON: \(error.localizedDescription)")
         }
-        var missing: [String] = []
-        for keyPath in keys where !keyExists(keyPath, in: json) {
-            missing.append(keyPath)
-        }
+        let missing = keys.filter { SettingsHasher.extractValue($0, from: json) == nil }
         if missing.isEmpty {
             return .pass("all settings keys present")
         }
@@ -408,17 +405,52 @@ struct SettingsKeysCheck: DoctorCheck {
     func fix() -> FixResult {
         .notFixable("Run 'mcs sync' to restore settings keys")
     }
+}
 
-    /// Check if a dot-notation key path exists in a JSON dictionary.
-    private func keyExists(_ keyPath: String, in json: [String: Any]) -> Bool {
-        let parts = keyPath.split(separator: ".", maxSplits: 1)
-        let topLevel = String(parts[0])
-        if parts.count == 2 {
-            let subKey = String(parts[1])
-            guard let nested = json[topLevel] as? [String: Any] else { return false }
-            return nested[subKey] != nil
+/// Verifies that pack-contributed settings values haven't drifted from the last sync.
+/// Skips if the settings file is missing or invalid (defers to `SettingsKeysCheck`).
+/// Reports `.warn` on drift — advisory, since the user may have intentionally changed values.
+struct SettingsDriftCheck: DoctorCheck {
+    let keys: [String]
+    let expectedHash: String
+    let settingsPath: URL
+    let packName: String
+
+    var name: String {
+        "Settings values (\(packName))"
+    }
+
+    var section: String {
+        "Settings"
+    }
+
+    func check() -> CheckResult {
+        let data: Data
+        do {
+            data = try Data(contentsOf: settingsPath)
+        } catch {
+            return .skip("settings file not found (checked separately)")
         }
-        return json[topLevel] != nil
+        let json: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .skip("settings file is not a JSON object (checked separately)")
+            }
+            json = parsed
+        } catch {
+            return .skip("settings file invalid: \(error.localizedDescription) (checked separately)")
+        }
+        guard let currentHash = SettingsHasher.hash(keyPaths: keys, in: json) else {
+            return .skip("no settings keys to verify")
+        }
+        if currentHash == expectedHash {
+            return .pass("values unchanged")
+        }
+        return .warn("settings values modified since last sync")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs sync' to restore settings")
     }
 }
 
