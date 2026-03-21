@@ -12,28 +12,7 @@ private struct LifecycleTestBed {
     let mockCLI: MockClaudeCLI
 
     init() throws {
-        home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-lifecycle-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        // Create ~/.claude/ and ~/.mcs/
-        try FileManager.default.createDirectory(
-            at: home.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: home.appendingPathComponent(".mcs"),
-            withIntermediateDirectories: true
-        )
-        // Create project with .git/ and .claude/
-        project = home.appendingPathComponent("test-project")
-        try FileManager.default.createDirectory(
-            at: project.appendingPathComponent(".git"),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: project.appendingPathComponent(".claude"),
-            withIntermediateDirectories: true
-        )
+        (home, project) = try makeSandboxProject(label: "lifecycle")
         env = Environment(home: home)
         mockCLI = MockClaudeCLI()
     }
