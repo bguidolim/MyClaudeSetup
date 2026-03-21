@@ -164,6 +164,21 @@ struct SinglePackLifecycleTests {
                     )
                 ),
                 ComponentDefinition(
+                    id: "test-pack.mcp-server",
+                    displayName: "Test MCP",
+                    description: "A test MCP server",
+                    type: .mcpServer,
+                    packIdentifier: "test-pack",
+                    dependencies: [],
+                    isRequired: true,
+                    installAction: .mcpServer(MCPServerConfig(
+                        name: "test-mcp",
+                        command: "npx",
+                        args: ["-y", "test-server"],
+                        env: ["API_KEY": "test-key"]
+                    ))
+                ),
+                ComponentDefinition(
                     id: "test-pack.settings",
                     displayName: "Settings",
                     description: "Pack settings",
@@ -200,6 +215,15 @@ struct SinglePackLifecycleTests {
         #expect(claudeContent.contains("Lint all the things."))
         #expect(claudeContent.contains("<!-- mcs:end test-pack -->"))
 
+        // Verify hook command auto-derived into settings
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let postToolGroups = settings.hooks?["PostToolUse"] ?? []
+        let hookCommands = postToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(hookCommands.contains("bash .claude/hooks/lint.sh"))
+
+        // Verify MCP server was registered via MockClaudeCLI
+        #expect(bed.mockCLI.mcpAddCalls.contains { $0.name == "test-mcp" })
+
         // Verify state
         let state = try bed.projectState()
         #expect(state.configuredPacks.contains("test-pack"))
@@ -207,6 +231,8 @@ struct SinglePackLifecycleTests {
         #expect(artifacts != nil)
         #expect(artifacts?.templateSections.contains("test-pack") == true)
         #expect(artifacts?.settingsKeys.contains("env") == true)
+        #expect(artifacts?.hookCommands.contains("bash .claude/hooks/lint.sh") == true)
+        #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
         // === Step 2: Doctor passes ===
         var runner = bed.makeDoctorRunner(registry: registry)
@@ -234,6 +260,9 @@ struct SinglePackLifecycleTests {
 
         // === Step 6: Remove the pack ===
         try configurator.configure(packs: [], confirmRemovals: false)
+
+        // Verify MCP server was removed via MockClaudeCLI
+        #expect(bed.mockCLI.mcpRemoveCalls.contains { $0.name == "test-mcp" })
 
         // Verify settings cleaned up (empty packs → settings file removed or empty)
         if FileManager.default.fileExists(atPath: bed.settingsLocalPath.path) {
@@ -634,5 +663,215 @@ struct StaleArtifactCleanupTests {
         // === Doctor passes ===
         var runner = bed.makeDoctorRunner(registry: registryV2)
         try runner.run()
+    }
+}
+
+// MARK: - Scenario 7: Template Dependency Filtering
+
+struct TemplateDependencyFilteringTests {
+    @Test("Excluding a component removes its dependent template sections")
+    func excludedComponentFiltersDependentTemplate() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "serena-hook.sh")
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [
+                ComponentDefinition(
+                    id: "my-pack.serena",
+                    displayName: "Serena",
+                    description: "Serena MCP server",
+                    type: .mcpServer,
+                    packIdentifier: "my-pack",
+                    dependencies: [],
+                    isRequired: false,
+                    installAction: .mcpServer(MCPServerConfig(
+                        name: "serena", command: "npx",
+                        args: ["-y", "serena"], env: [:]
+                    ))
+                ),
+                ComponentDefinition(
+                    id: "my-pack.hook",
+                    displayName: "Hook",
+                    description: "A hook",
+                    type: .hookFile,
+                    packIdentifier: "my-pack",
+                    dependencies: [],
+                    isRequired: true,
+                    installAction: .copyPackFile(
+                        source: hookSource, destination: "hook.sh", fileType: .hook
+                    )
+                ),
+            ],
+            templates: [
+                TemplateContribution(
+                    sectionIdentifier: "my-pack",
+                    templateContent: "## My Pack\nGeneral instructions.",
+                    placeholders: []
+                ),
+                TemplateContribution(
+                    sectionIdentifier: "my-pack-serena",
+                    templateContent: "## Serena Instructions\nUse Serena for code editing.",
+                    placeholders: [],
+                    dependencies: ["my-pack.serena"]
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // === Step 1: Configure with all components ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let content = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(content.contains("<!-- mcs:begin my-pack -->"))
+        #expect(content.contains("<!-- mcs:begin my-pack-serena -->"))
+        #expect(content.contains("Use Serena for code editing."))
+
+        // === Step 2: Exclude Serena → dependent template removed ===
+        try configurator.configure(
+            packs: [pack],
+            confirmRemovals: false,
+            excludedComponents: ["my-pack": Set(["my-pack.serena"])]
+        )
+
+        let afterContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(afterContent.contains("<!-- mcs:begin my-pack -->"))
+        #expect(afterContent.contains("General instructions."))
+        // Serena-dependent template section should be removed
+        #expect(!afterContent.contains("<!-- mcs:begin my-pack-serena -->"))
+        #expect(!afterContent.contains("Use Serena for code editing."))
+
+        // MCP server should have been removed
+        #expect(bed.mockCLI.mcpRemoveCalls.contains { $0.name == "serena" })
+
+        // === Step 3: Re-include → both templates restored ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let restoredContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(restoredContent.contains("<!-- mcs:begin my-pack-serena -->"))
+        #expect(restoredContent.contains("Use Serena for code editing."))
+    }
+}
+
+// MARK: - Scenario 8: Global Scope Exclusion + Doctor
+
+struct GlobalScopeExclusionTests {
+    @Test("Global scope exclusion recorded and doctor skips excluded checks")
+    func globalExclusionAndDoctor() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookA = try bed.makeHookSource(name: "globalA.sh")
+        let hookB = try bed.makeHookSource(name: "globalB.sh")
+
+        let pack = MockTechPack(
+            identifier: "global-pack",
+            displayName: "Global Pack",
+            components: [
+                ComponentDefinition(
+                    id: "global-pack.hookA",
+                    displayName: "Global Hook A",
+                    description: "First global hook",
+                    type: .hookFile,
+                    packIdentifier: "global-pack",
+                    dependencies: [],
+                    isRequired: false,
+                    installAction: .copyPackFile(
+                        source: hookA, destination: "globalA.sh", fileType: .hook
+                    )
+                ),
+                ComponentDefinition(
+                    id: "global-pack.hookB",
+                    displayName: "Global Hook B",
+                    description: "Second global hook",
+                    type: .hookFile,
+                    packIdentifier: "global-pack",
+                    dependencies: [],
+                    isRequired: false,
+                    installAction: .copyPackFile(
+                        source: hookB, destination: "globalB.sh", fileType: .hook
+                    )
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // === Step 1: Configure global with both ===
+        let configurator = bed.makeGlobalConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let hookAPath = bed.env.hooksDirectory.appendingPathComponent("globalA.sh")
+        let hookBPath = bed.env.hooksDirectory.appendingPathComponent("globalB.sh")
+        #expect(FileManager.default.fileExists(atPath: hookAPath.path))
+        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
+
+        // === Step 2: Reconfigure with hookA excluded ===
+        try configurator.configure(
+            packs: [pack],
+            confirmRemovals: false,
+            excludedComponents: ["global-pack": Set(["global-pack.hookA"])]
+        )
+
+        #expect(!FileManager.default.fileExists(atPath: hookAPath.path))
+        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
+
+        // Verify exclusion in global state
+        let globalState = try ProjectState(stateFile: bed.env.globalStateFile)
+        let excluded = globalState.excludedComponents(for: "global-pack")
+        #expect(excluded.contains("global-pack.hookA"))
+
+        // === Step 3: Doctor with globalOnly runs without error ===
+        var runner = bed.makeGlobalDoctorRunner(registry: registry)
+        try runner.run()
+    }
+}
+
+// MARK: - Scenario 9: Doctor Fix Restores Outdated Section Content
+
+struct DoctorFixSectionTests {
+    @Test("Doctor fix restores tampered section content")
+    func doctorFixRestoresSection() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            templates: [TemplateContribution(
+                sectionIdentifier: "my-pack",
+                templateContent: "## My Pack\nOriginal content that should be preserved.",
+                placeholders: []
+            )]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // === Configure ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let content = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(content.contains("Original content that should be preserved."))
+
+        // === Tamper with section content ===
+        let tamperedContent = content.replacingOccurrences(
+            of: "Original content that should be preserved.",
+            with: "TAMPERED by user."
+        )
+        try tamperedContent.write(to: bed.claudeLocalPath, atomically: true, encoding: .utf8)
+
+        // Verify the tamper took effect
+        let readBack = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(readBack.contains("TAMPERED by user."))
+
+        // === Re-sync restores the original content ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let restoredContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(restoredContent.contains("Original content that should be preserved."))
+        #expect(!restoredContent.contains("TAMPERED by user."))
     }
 }
