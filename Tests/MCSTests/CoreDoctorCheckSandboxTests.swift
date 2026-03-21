@@ -2,30 +2,12 @@ import Foundation
 @testable import mcs
 import Testing
 
-// MARK: - Sandbox Helpers
-
-private func makeSandboxHome(label: String = "sandbox") throws -> URL {
-    let dir = FileManager.default.temporaryDirectory
-        .appendingPathComponent("mcs-\(label)-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    // Create ~/.claude/ and ~/.mcs/ subdirectories
-    try FileManager.default.createDirectory(
-        at: dir.appendingPathComponent(".claude"),
-        withIntermediateDirectories: true
-    )
-    try FileManager.default.createDirectory(
-        at: dir.appendingPathComponent(".mcs"),
-        withIntermediateDirectories: true
-    )
-    return dir
-}
-
 // MARK: - MCPServerCheck Sandbox Tests
 
 struct MCPServerCheckSandboxTests {
     @Test("pass when server exists in global mcpServers")
     func passGlobalServer() throws {
-        let home = try makeSandboxHome(label: "mcp-global")
+        let home = try makeGlobalTmpDir(label: "mcp-global")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -47,7 +29,7 @@ struct MCPServerCheckSandboxTests {
 
     @Test("pass when server exists in project-scoped mcpServers")
     func passProjectServer() throws {
-        let home = try makeSandboxHome(label: "mcp-project")
+        let home = try makeGlobalTmpDir(label: "mcp-project")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -77,7 +59,7 @@ struct MCPServerCheckSandboxTests {
 
     @Test("fail when server is missing from claude.json")
     func failMissingServer() throws {
-        let home = try makeSandboxHome(label: "mcp-missing")
+        let home = try makeGlobalTmpDir(label: "mcp-missing")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -99,10 +81,9 @@ struct MCPServerCheckSandboxTests {
 
     @Test("fail when claude.json does not exist")
     func failNoClaudeJSON() throws {
-        let home = try makeSandboxHome(label: "mcp-nofile")
+        let home = try makeGlobalTmpDir(label: "mcp-nofile")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
-        // Don't create .claude.json
 
         let check = MCPServerCheck(name: "Test", serverName: "test-server", environment: env)
         let result = check.check()
@@ -114,7 +95,7 @@ struct MCPServerCheckSandboxTests {
 
     @Test("fail when claude.json contains invalid JSON")
     func failInvalidJSON() throws {
-        let home = try makeSandboxHome(label: "mcp-invalid")
+        let home = try makeGlobalTmpDir(label: "mcp-invalid")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -134,7 +115,7 @@ struct MCPServerCheckSandboxTests {
 struct PluginCheckSandboxTests {
     @Test("pass when plugin is enabled in settings.json")
     func passWhenEnabled() throws {
-        let home = try makeSandboxHome(label: "plugin-pass")
+        let home = try makeGlobalTmpDir(label: "plugin-pass")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -158,7 +139,7 @@ struct PluginCheckSandboxTests {
 
     @Test("fail when plugin is not in enabledPlugins")
     func failWhenNotEnabled() throws {
-        let home = try makeSandboxHome(label: "plugin-fail")
+        let home = try makeGlobalTmpDir(label: "plugin-fail")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -182,7 +163,7 @@ struct PluginCheckSandboxTests {
 
     @Test("fail when settings.json does not exist")
     func failWhenNoSettings() throws {
-        let home = try makeSandboxHome(label: "plugin-nosettings")
+        let home = try makeGlobalTmpDir(label: "plugin-nosettings")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
         // Don't create settings.json
@@ -202,7 +183,7 @@ struct PluginCheckSandboxTests {
 struct HookCheckSandboxTests {
     @Test("pass when hook file exists and is executable")
     func passWhenExecutable() throws {
-        let home = try makeSandboxHome(label: "hook-pass")
+        let home = try makeGlobalTmpDir(label: "hook-pass")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -223,7 +204,7 @@ struct HookCheckSandboxTests {
 
     @Test("fail when hook file is missing")
     func failWhenMissing() throws {
-        let home = try makeSandboxHome(label: "hook-missing")
+        let home = try makeGlobalTmpDir(label: "hook-missing")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -238,7 +219,7 @@ struct HookCheckSandboxTests {
 
     @Test("skip when optional hook is missing")
     func skipWhenOptionalMissing() throws {
-        let home = try makeSandboxHome(label: "hook-optional")
+        let home = try makeGlobalTmpDir(label: "hook-optional")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -253,7 +234,7 @@ struct HookCheckSandboxTests {
 
     @Test("fail when hook file is not executable")
     func failWhenNotExecutable() throws {
-        let home = try makeSandboxHome(label: "hook-noexec")
+        let home = try makeGlobalTmpDir(label: "hook-noexec")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -274,7 +255,7 @@ struct HookCheckSandboxTests {
 
     @Test("fix makes non-executable hook executable")
     func fixMakesExecutable() throws {
-        let home = try makeSandboxHome(label: "hook-fix")
+        let home = try makeGlobalTmpDir(label: "hook-fix")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -299,7 +280,7 @@ struct HookCheckSandboxTests {
 
     @Test("fix returns notFixable when hook file is missing")
     func fixNotFixableWhenMissing() throws {
-        let home = try makeSandboxHome(label: "hook-fix-missing")
+        let home = try makeGlobalTmpDir(label: "hook-fix-missing")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -318,7 +299,7 @@ struct HookCheckSandboxTests {
 struct ProjectIndexCheckSandboxTests {
     @Test("pass when all tracked paths exist")
     func passWhenAllPathsExist() throws {
-        let home = try makeSandboxHome(label: "index-pass")
+        let home = try makeGlobalTmpDir(label: "index-pass")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -342,7 +323,7 @@ struct ProjectIndexCheckSandboxTests {
 
     @Test("fail when stale paths exist")
     func failWhenStalePaths() throws {
-        let home = try makeSandboxHome(label: "index-stale")
+        let home = try makeGlobalTmpDir(label: "index-stale")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -363,7 +344,7 @@ struct ProjectIndexCheckSandboxTests {
 
     @Test("warn when index is empty")
     func warnWhenEmpty() throws {
-        let home = try makeSandboxHome(label: "index-empty")
+        let home = try makeGlobalTmpDir(label: "index-empty")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -383,7 +364,7 @@ struct ProjectIndexCheckSandboxTests {
 
     @Test("fix prunes stale entries")
     func fixPrunesStaleEntries() throws {
-        let home = try makeSandboxHome(label: "index-fix")
+        let home = try makeGlobalTmpDir(label: "index-fix")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -421,7 +402,7 @@ struct ProjectIndexCheckSandboxTests {
 
     @Test("global sentinel paths are never stale")
     func globalSentinelNotStale() throws {
-        let home = try makeSandboxHome(label: "index-global")
+        let home = try makeGlobalTmpDir(label: "index-global")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -448,7 +429,7 @@ struct DerivedDoctorCheckSandboxTests {
 
     @Test("copyPackFile uses injected environment for global URL")
     func copyPackFileUsesInjectedEnv() throws {
-        let home = try makeSandboxHome(label: "derived-env")
+        let home = try makeGlobalTmpDir(label: "derived-env")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -477,7 +458,7 @@ struct DerivedDoctorCheckSandboxTests {
 
     @Test("copyPackFile with project root returns project-scoped path and global fallback")
     func copyPackFileWithProjectRoot() throws {
-        let home = try makeSandboxHome(label: "derived-project")
+        let home = try makeGlobalTmpDir(label: "derived-project")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
         let projectRoot = home.appendingPathComponent("my-project")
@@ -510,7 +491,7 @@ struct DerivedDoctorCheckSandboxTests {
 
     @Test("mcpServer check uses injected environment")
     func mcpServerUsesInjectedEnv() throws {
-        let home = try makeSandboxHome(label: "derived-mcp")
+        let home = try makeGlobalTmpDir(label: "derived-mcp")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -542,7 +523,7 @@ struct DerivedDoctorCheckSandboxTests {
 
     @Test("allDoctorChecks forwards environment to derived check")
     func allDoctorChecksForwardsEnv() throws {
-        let home = try makeSandboxHome(label: "derived-all")
+        let home = try makeGlobalTmpDir(label: "derived-all")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
@@ -570,6 +551,216 @@ struct DerivedDoctorCheckSandboxTests {
             }
         } else {
             Issue.record("Expected PluginCheck, got \(type(of: checks.first!))")
+        }
+    }
+}
+
+// MARK: - PluginCheck Invalid JSON
+
+extension PluginCheckSandboxTests {
+    @Test("fail when settings.json contains invalid JSON")
+    func failWhenInvalidSettings() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-invalid")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        try "not valid json".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = PluginCheck(pluginRef: PluginRef("my-plugin"))
+        check.environment = env
+        let result = check.check()
+        guard case let .fail(msg) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(msg.contains("invalid"))
+    }
+}
+
+// MARK: - ExternalHookEventExistsCheck Sandbox Tests
+
+struct ExternalHookEventExistsCheckSandboxTests {
+    @Test("pass when hook event is registered in settings")
+    func passWhenRegistered() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-pass")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let settings = """
+        {
+          "hooks": {
+            "PostToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/lint.sh" }] }
+            ]
+          }
+        }
+        """
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+    }
+
+    @Test("fail when hook event is not registered")
+    func failWhenNotRegistered() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-fail")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let settings = """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/guard.sh" }] }
+            ]
+          }
+        }
+        """
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+    }
+
+    @Test("skip when optional hook event is not registered")
+    func skipWhenOptionalNotRegistered() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-skip")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "SessionStart hook", section: "Hooks",
+            event: "SessionStart", isOptional: true
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .skip = result else {
+            Issue.record("Expected .skip, got \(result)")
+            return
+        }
+    }
+
+    @Test("fail when settings.json does not exist")
+    func failWhenNoSettings() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-nosettings")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+    }
+}
+
+// MARK: - ExternalSettingsKeyEqualsCheck Sandbox Tests
+
+struct ExternalSettingsKeyEqualsCheckSandboxTests {
+    @Test("pass when key matches expected value")
+    func passWhenMatches() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-pass")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let settings = """
+        { "permissions": { "defaultMode": "allowEdits" } }
+        """
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits"
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+    }
+
+    @Test("warn when key value differs from expected")
+    func warnWhenDiffers() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-warn")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let settings = """
+        { "permissions": { "defaultMode": "deny" } }
+        """
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits"
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .warn = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+    }
+
+    @Test("warn when key is absent")
+    func warnWhenAbsent() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-absent")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits"
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .warn = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+    }
+
+    @Test("fail when settings.json does not exist")
+    func failWhenNoSettings() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-nosettings")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits"
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
         }
     }
 }
