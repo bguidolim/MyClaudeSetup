@@ -155,7 +155,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         previousSettingsKeys: [String: [String]],
         resolvedValues: [String: String],
         output: CLIOutput
-    ) throws -> [String: [String]] {
+    ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String]) {
         var settings: Settings
         do {
             settings = try Settings.load(from: scope.settingsPath)
@@ -213,7 +213,14 @@ struct GlobalSyncStrategy: SyncStrategy {
             }
         }
 
-        return contributedKeys
+        let settingsHashes = ConfiguratorSupport.computeSettingsHashes(
+            hasContent: hasContent,
+            contributedKeys: contributedKeys,
+            settingsPath: scope.settingsPath,
+            output: output
+        )
+
+        return (contributedKeys, settingsHashes)
     }
 
     // MARK: - CLAUDE.md Composition

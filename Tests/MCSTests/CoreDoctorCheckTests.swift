@@ -345,3 +345,151 @@ struct CommandFileCheckTests {
         #expect(CommandFileCheck.managedMarker == "<!-- mcs:managed -->")
     }
 }
+
+// MARK: - SettingsDriftCheck
+
+struct SettingsDriftCheckTests {
+    private func makeTempSettings(content: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-test-\(UUID().uuidString).json")
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    @Test("pass when hash matches")
+    func passWhenHashMatches() throws {
+        let json = """
+        {"env": {"FOO": "bar"}, "alwaysThinkingEnabled": true}
+        """
+        let url = try makeTempSettings(content: json)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let keys = ["env.FOO", "alwaysThinkingEnabled"]
+        let parsed = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let expectedHash = try #require(SettingsHasher.hash(keyPaths: keys, in: parsed))
+
+        let check = SettingsDriftCheck(
+            keys: keys,
+            expectedHash: expectedHash,
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case .pass = result {
+            // expected
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("warn when value modified")
+    func warnWhenValueModified() throws {
+        let originalJSON = """
+        {"env": {"FOO": "bar"}}
+        """
+        let parsed = try #require(JSONSerialization.jsonObject(with: Data(originalJSON.utf8)) as? [String: Any])
+        let keys = ["env.FOO"]
+        let expectedHash = try #require(SettingsHasher.hash(keyPaths: keys, in: parsed))
+
+        // Write modified content
+        let modifiedJSON = """
+        {"env": {"FOO": "changed"}}
+        """
+        let url = try makeTempSettings(content: modifiedJSON)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let check = SettingsDriftCheck(
+            keys: keys,
+            expectedHash: expectedHash,
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("modified since last sync"))
+        } else {
+            Issue.record("Expected .warn, got \(result)")
+        }
+    }
+
+    @Test("skip when settings file missing")
+    func skipWhenFileMissing() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent-\(UUID().uuidString).json")
+        let check = SettingsDriftCheck(
+            keys: ["env.FOO"],
+            expectedHash: "abc123",
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case .skip = result {
+            // expected
+        } else {
+            Issue.record("Expected .skip, got \(result)")
+        }
+    }
+
+    @Test("skip when settings file contains invalid JSON")
+    func skipWhenInvalidJSON() throws {
+        let url = try makeTempSettings(content: "not valid json {{{")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let check = SettingsDriftCheck(
+            keys: ["env.FOO"],
+            expectedHash: "abc123",
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case .skip = result {
+            // expected
+        } else {
+            Issue.record("Expected .skip, got \(result)")
+        }
+    }
+
+    @Test("fix returns notFixable")
+    func fixReturnsNotFixable() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-test-\(UUID().uuidString).json")
+        let check = SettingsDriftCheck(
+            keys: ["env.FOO"],
+            expectedHash: "abc123",
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.fix()
+        if case let .notFixable(msg) = result {
+            #expect(msg.contains("mcs sync"))
+        } else {
+            Issue.record("Expected .notFixable, got \(result)")
+        }
+    }
+
+    @Test("name includes pack name")
+    func nameIncludesPackName() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-test-\(UUID().uuidString).json")
+        let check = SettingsDriftCheck(
+            keys: [],
+            expectedHash: "",
+            settingsPath: url,
+            packName: "my-pack"
+        )
+        #expect(check.name == "Settings values (my-pack)")
+    }
+
+    @Test("section is Settings")
+    func sectionIsSettings() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-test-\(UUID().uuidString).json")
+        let check = SettingsDriftCheck(
+            keys: [],
+            expectedHash: "",
+            settingsPath: url,
+            packName: "test"
+        )
+        #expect(check.section == "Settings")
+    }
+}

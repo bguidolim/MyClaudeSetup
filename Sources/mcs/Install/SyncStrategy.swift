@@ -45,14 +45,15 @@ protocol SyncStrategy {
     /// - Parameter previousSettingsKeys: Settings keys tracked in the previous sync's artifact records.
     ///   Global scope uses these to strip stale keys before recomposing; both scopes derive
     ///   `dropKeys` from them to prevent Layer 3 re-injection during `Settings.save()`.
-    /// - Returns: A mapping of pack ID to contributed extraJSON key paths.
+    /// - Returns: A mapping of pack ID to contributed extraJSON key paths,
+    ///   and per-pack SHA-256 hashes of the contributed values for drift detection.
     func composeSettings(
         packs: [any TechPack],
         excludedComponents: [String: Set<String>],
         previousSettingsKeys: [String: [String]],
         resolvedValues: [String: String],
         output: CLIOutput
-    ) throws -> [String: [String]]
+    ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String])
 
     /// Compose the CLAUDE markdown file from template contributions.
     ///

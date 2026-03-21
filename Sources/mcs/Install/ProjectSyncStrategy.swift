@@ -127,7 +127,7 @@ struct ProjectSyncStrategy: SyncStrategy {
         previousSettingsKeys: [String: [String]],
         resolvedValues: [String: String],
         output: CLIOutput
-    ) throws -> [String: [String]] {
+    ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String]) {
         var settings = Settings()
 
         // Collect top-level keys to prevent Layer 3 re-injection of stale extraJSON keys
@@ -164,7 +164,14 @@ struct ProjectSyncStrategy: SyncStrategy {
             }
         }
 
-        return contributedKeys
+        let settingsHashes = ConfiguratorSupport.computeSettingsHashes(
+            hasContent: hasContent,
+            contributedKeys: contributedKeys,
+            settingsPath: scope.settingsPath,
+            output: output
+        )
+
+        return (contributedKeys, settingsHashes)
     }
 
     // MARK: - CLAUDE.local.md Composition

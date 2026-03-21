@@ -199,16 +199,17 @@ struct Configurator {
         try state.save()
 
         // 6. Compose settings file from ALL selected packs
-        let contributedKeys = try strategy.composeSettings(
+        let (contributedKeys, settingsHashes) = try strategy.composeSettings(
             packs: packs, excludedComponents: excludedComponents,
             previousSettingsKeys: previousSettingsKeys,
             resolvedValues: allValues, output: output
         )
 
-        // 6b. Record contributed settings keys in artifact records
+        // 6b. Record contributed settings keys and value hashes in artifact records
         for (packID, keys) in contributedKeys {
             if var artifacts = state.artifacts(for: packID) {
                 artifacts.settingsKeys = keys
+                artifacts.settingsHash = settingsHashes[packID]
                 state.setArtifacts(artifacts, for: packID)
             }
         }

@@ -21,6 +21,9 @@ struct PackArtifactRecord: Codable, Equatable {
     var gitignoreEntries: [String] = []
     /// SHA-256 hashes of installed files (project-relative path → hash) for content drift detection.
     var fileHashes: [String: String] = [:]
+    /// SHA-256 hash of the pack's contributed settings key-value pairs, for drift detection.
+    /// Nil for state files written by older MCS versions (backward compat).
+    var settingsHash: String?
 
     /// Whether all artifact lists are empty (cleanup is complete).
     var isEmpty: Bool {
@@ -43,6 +46,7 @@ struct PackArtifactRecord: Codable, Equatable {
         plugins = try container.decodeIfPresent([String].self, forKey: .plugins) ?? []
         gitignoreEntries = try container.decodeIfPresent([String].self, forKey: .gitignoreEntries) ?? []
         fileHashes = try container.decodeIfPresent([String: String].self, forKey: .fileHashes) ?? [:]
+        settingsHash = try container.decodeIfPresent(String.self, forKey: .settingsHash)
     }
 
     init(
@@ -54,7 +58,8 @@ struct PackArtifactRecord: Codable, Equatable {
         brewPackages: [String] = [],
         plugins: [String] = [],
         gitignoreEntries: [String] = [],
-        fileHashes: [String: String] = [:]
+        fileHashes: [String: String] = [:],
+        settingsHash: String? = nil
     ) {
         self.mcpServers = mcpServers
         self.files = files
@@ -65,6 +70,7 @@ struct PackArtifactRecord: Codable, Equatable {
         self.plugins = plugins
         self.gitignoreEntries = gitignoreEntries
         self.fileHashes = fileHashes
+        self.settingsHash = settingsHash
     }
 
     /// Record a brew package as MCS-owned, deduplicating automatically.
