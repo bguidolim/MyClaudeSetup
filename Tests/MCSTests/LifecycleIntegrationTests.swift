@@ -92,10 +92,94 @@ private struct LifecycleTestBed {
         return file
     }
 
+    // MARK: - Doctor Convenience
+
+    func runDoctor(registry: TechPackRegistry, packFilter: String? = nil) throws {
+        var runner = makeDoctorRunner(registry: registry, packFilter: packFilter)
+        try runner.run()
+    }
+
+    func runGlobalDoctor(registry: TechPackRegistry) throws {
+        var runner = makeGlobalDoctorRunner(registry: registry)
+        try runner.run()
+    }
+
+    // MARK: - Component Factories
+
+    func hookComponent(
+        pack: String, id: String, source: URL, destination: String,
+        hookEvent: String? = nil, isRequired: Bool = true
+    ) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "Hook \(id)",
+            type: .hookFile,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: isRequired,
+            hookEvent: hookEvent,
+            installAction: .copyPackFile(source: source, destination: destination, fileType: .hook)
+        )
+    }
+
+    func skillComponent(
+        pack: String, id: String, source: URL, destination: String
+    ) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "Skill \(id)",
+            type: .skill,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: true,
+            installAction: .copyPackFile(source: source, destination: destination, fileType: .skill)
+        )
+    }
+
+    func settingsComponent(pack: String, id: String, source: URL) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "Settings \(id)",
+            type: .configuration,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: true,
+            installAction: .settingsMerge(source: source)
+        )
+    }
+
+    func mcpComponent(
+        pack: String, id: String, name: String,
+        command: String = "npx", args: [String] = [], env: [String: String] = [:],
+        isRequired: Bool = true
+    ) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "MCP \(id)",
+            type: .mcpServer,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: isRequired,
+            installAction: .mcpServer(MCPServerConfig(
+                name: name, command: command, args: args, env: env
+            ))
+        )
+    }
+
     // MARK: - Assertions
 
     func projectState() throws -> ProjectState {
         try ProjectState(projectRoot: project)
+    }
+
+    func settingsEnv() throws -> [String: Any] {
+        let data = try Data(contentsOf: settingsLocalPath)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        return json["env"] as? [String: Any] ?? [:]
     }
 
     var settingsLocalPath: URL {
@@ -127,46 +211,9 @@ struct SinglePackLifecycleTests {
             identifier: "test-pack",
             displayName: "Test Pack",
             components: [
-                ComponentDefinition(
-                    id: "test-pack.lint-hook",
-                    displayName: "Lint Hook",
-                    description: "Post-tool lint hook",
-                    type: .hookFile,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    hookEvent: "PostToolUse",
-                    installAction: .copyPackFile(
-                        source: hookSource,
-                        destination: "lint.sh",
-                        fileType: .hook
-                    )
-                ),
-                ComponentDefinition(
-                    id: "test-pack.mcp-server",
-                    displayName: "Test MCP",
-                    description: "A test MCP server",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "test-mcp",
-                        command: "npx",
-                        args: ["-y", "test-server"],
-                        env: ["API_KEY": "test-key"]
-                    ))
-                ),
-                ComponentDefinition(
-                    id: "test-pack.settings",
-                    displayName: "Settings",
-                    description: "Pack settings",
-                    type: .configuration,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .settingsMerge(source: settingsSource)
-                ),
+                bed.hookComponent(pack: "test-pack", id: "lint-hook", source: hookSource, destination: "lint.sh", hookEvent: "PostToolUse"),
+                bed.mcpComponent(pack: "test-pack", id: "mcp-server", name: "test-mcp", args: ["-y", "test-server"], env: ["API_KEY": "test-key"]),
+                bed.settingsComponent(pack: "test-pack", id: "settings", source: settingsSource),
             ],
             templates: [TemplateContribution(
                 sectionIdentifier: "test-pack",
@@ -200,8 +247,8 @@ struct SinglePackLifecycleTests {
         let hookCommands = postToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
         #expect(hookCommands.contains("bash .claude/hooks/lint.sh"))
 
-        // Verify MCP server was registered via MockClaudeCLI
-        #expect(bed.mockCLI.mcpAddCalls.contains { $0.name == "test-mcp" })
+        // Verify MCP server was registered via MockClaudeCLI with local scope
+        #expect(bed.mockCLI.mcpAddCalls.contains { $0.name == "test-mcp" && $0.scope == "local" })
 
         // Verify state
         let state = try bed.projectState()
@@ -214,8 +261,7 @@ struct SinglePackLifecycleTests {
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
         // === Step 2: Doctor passes ===
-        var runner = bed.makeDoctorRunner(registry: registry)
-        try runner.run()
+        try bed.runDoctor(registry: registry)
 
         // === Step 3: Introduce settings drift ===
         var driftedSettings = settingsJSON
@@ -226,8 +272,7 @@ struct SinglePackLifecycleTests {
         try driftedData.write(to: bed.settingsLocalPath)
 
         // === Step 4: Doctor detects drift ===
-        var driftRunner = bed.makeDoctorRunner(registry: registry)
-        try driftRunner.run()
+        try bed.runDoctor(registry: registry)
         // (The runner completes — drift is reported as .warn, not a throw)
 
         // === Step 5: Re-sync fixes drift ===
@@ -276,16 +321,7 @@ struct MultiPackConvergenceTests {
         let packA = MockTechPack(
             identifier: "pack-a",
             displayName: "Pack A",
-            components: [ComponentDefinition(
-                id: "pack-a.settings",
-                displayName: "A Settings",
-                description: "Pack A settings",
-                type: .configuration,
-                packIdentifier: "pack-a",
-                dependencies: [],
-                isRequired: true,
-                installAction: .settingsMerge(source: settingsA)
-            )],
+            components: [bed.settingsComponent(pack: "pack-a", id: "settings", source: settingsA)],
             templates: [TemplateContribution(
                 sectionIdentifier: "pack-a",
                 templateContent: "## Pack A\nPack A content.",
@@ -295,16 +331,7 @@ struct MultiPackConvergenceTests {
         let packB = MockTechPack(
             identifier: "pack-b",
             displayName: "Pack B",
-            components: [ComponentDefinition(
-                id: "pack-b.settings",
-                displayName: "B Settings",
-                description: "Pack B settings",
-                type: .configuration,
-                packIdentifier: "pack-b",
-                dependencies: [],
-                isRequired: true,
-                installAction: .settingsMerge(source: settingsB)
-            )],
+            components: [bed.settingsComponent(pack: "pack-b", id: "settings", source: settingsB)],
             templates: [TemplateContribution(
                 sectionIdentifier: "pack-b",
                 templateContent: "## Pack B\nPack B content.",
@@ -317,28 +344,23 @@ struct MultiPackConvergenceTests {
         // === Step 1: Configure both ===
         try configurator.configure(packs: [packA, packB], confirmRemovals: false)
 
-        let settingsData = try Data(contentsOf: bed.settingsLocalPath)
-        let json = try #require(JSONSerialization.jsonObject(with: settingsData) as? [String: Any])
-        let envDict = json["env"] as? [String: Any]
-        #expect(envDict?["PACK_A_KEY"] as? String == "valueA")
-        #expect(envDict?["PACK_B_KEY"] as? String == "valueB")
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_A_KEY"] as? String == "valueA")
+        #expect(envDict["PACK_B_KEY"] as? String == "valueB")
 
         let claudeContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
         #expect(claudeContent.contains("<!-- mcs:begin pack-a -->"))
         #expect(claudeContent.contains("<!-- mcs:begin pack-b -->"))
 
         // === Step 2: Doctor passes ===
-        var runner = bed.makeDoctorRunner(registry: registry)
-        try runner.run()
+        try bed.runDoctor(registry: registry)
 
         // === Step 3: Remove pack A only ===
         try configurator.configure(packs: [packB], confirmRemovals: false)
 
-        let afterData = try Data(contentsOf: bed.settingsLocalPath)
-        let afterJSON = try #require(JSONSerialization.jsonObject(with: afterData) as? [String: Any])
-        let afterEnv = afterJSON["env"] as? [String: Any]
-        #expect(afterEnv?["PACK_A_KEY"] == nil)
-        #expect(afterEnv?["PACK_B_KEY"] as? String == "valueB")
+        let afterEnv = try bed.settingsEnv()
+        #expect(afterEnv["PACK_A_KEY"] == nil)
+        #expect(afterEnv["PACK_B_KEY"] as? String == "valueB")
 
         let afterClaude = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
         #expect(!afterClaude.contains("<!-- mcs:begin pack-a -->"))
@@ -352,11 +374,9 @@ struct MultiPackConvergenceTests {
         // === Step 4: Re-add pack A ===
         try configurator.configure(packs: [packA, packB], confirmRemovals: false)
 
-        let restoredData = try Data(contentsOf: bed.settingsLocalPath)
-        let restoredJSON = try #require(JSONSerialization.jsonObject(with: restoredData) as? [String: Any])
-        let restoredEnv = restoredJSON["env"] as? [String: Any]
-        #expect(restoredEnv?["PACK_A_KEY"] as? String == "valueA")
-        #expect(restoredEnv?["PACK_B_KEY"] as? String == "valueB")
+        let restoredEnv = try bed.settingsEnv()
+        #expect(restoredEnv["PACK_A_KEY"] as? String == "valueA")
+        #expect(restoredEnv["PACK_B_KEY"] as? String == "valueB")
     }
 }
 
@@ -387,8 +407,7 @@ struct PackUpdateTemplateTests {
         #expect(content.contains("Version 1 content."))
 
         // === Step 2: Doctor passes with v1 ===
-        var runner = bed.makeDoctorRunner(registry: registry)
-        try runner.run()
+        try bed.runDoctor(registry: registry)
 
         // === Step 3: Create v2 pack and re-configure ===
         let packV2 = MockTechPack(
@@ -410,8 +429,7 @@ struct PackUpdateTemplateTests {
         #expect(!updatedContent.contains("Version 1 content."))
 
         // === Step 4: Doctor passes with v2 ===
-        var runnerV2 = bed.makeDoctorRunner(registry: registryV2)
-        try runnerV2.run()
+        try bed.runDoctor(registry: registryV2)
     }
 }
 
@@ -430,26 +448,8 @@ struct ComponentExclusionLifecycleTests {
             identifier: "my-pack",
             displayName: "My Pack",
             components: [
-                ComponentDefinition(
-                    id: "my-pack.hookA",
-                    displayName: "Hook A",
-                    description: "First hook",
-                    type: .hookFile,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(source: hookA, destination: "hookA.sh", fileType: .hook)
-                ),
-                ComponentDefinition(
-                    id: "my-pack.hookB",
-                    displayName: "Hook B",
-                    description: "Second hook",
-                    type: .hookFile,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(source: hookB, destination: "hookB.sh", fileType: .hook)
-                ),
+                bed.hookComponent(pack: "my-pack", id: "hookA", source: hookA, destination: "hookA.sh", isRequired: false),
+                bed.hookComponent(pack: "my-pack", id: "hookB", source: hookB, destination: "hookB.sh", isRequired: false),
             ]
         )
         let registry = TechPackRegistry(packs: [pack])
@@ -497,20 +497,7 @@ struct GlobalScopeLifecycleTests {
         let pack = MockTechPack(
             identifier: "global-pack",
             displayName: "Global Pack",
-            components: [ComponentDefinition(
-                id: "global-pack.hook",
-                displayName: "Global Hook",
-                description: "A global hook",
-                type: .hookFile,
-                packIdentifier: "global-pack",
-                dependencies: [],
-                isRequired: true,
-                installAction: .copyPackFile(
-                    source: hookSource,
-                    destination: "global-hook.sh",
-                    fileType: .hook
-                )
-            )]
+            components: [bed.hookComponent(pack: "global-pack", id: "hook", source: hookSource, destination: "global-hook.sh")]
         )
         let registry = TechPackRegistry(packs: [pack])
 
@@ -527,8 +514,7 @@ struct GlobalScopeLifecycleTests {
         #expect(globalState.configuredPacks.contains("global-pack"))
 
         // === Doctor passes ===
-        var runner = bed.makeGlobalDoctorRunner(registry: registry)
-        try runner.run()
+        try bed.runGlobalDoctor(registry: registry)
     }
 }
 
@@ -548,36 +534,9 @@ struct StaleArtifactCleanupTests {
             identifier: "my-pack",
             displayName: "My Pack",
             components: [
-                ComponentDefinition(
-                    id: "my-pack.skillA",
-                    displayName: "Skill A",
-                    description: "First skill",
-                    type: .skill,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .copyPackFile(source: skillA, destination: "skillA.md", fileType: .skill)
-                ),
-                ComponentDefinition(
-                    id: "my-pack.skillB",
-                    displayName: "Skill B",
-                    description: "Second skill",
-                    type: .skill,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .copyPackFile(source: skillB, destination: "skillB.md", fileType: .skill)
-                ),
-                ComponentDefinition(
-                    id: "my-pack.skillC",
-                    displayName: "Skill C",
-                    description: "Third skill",
-                    type: .skill,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .copyPackFile(source: skillC, destination: "skillC.md", fileType: .skill)
-                ),
+                bed.skillComponent(pack: "my-pack", id: "skillA", source: skillA, destination: "skillA.md"),
+                bed.skillComponent(pack: "my-pack", id: "skillB", source: skillB, destination: "skillB.md"),
+                bed.skillComponent(pack: "my-pack", id: "skillC", source: skillC, destination: "skillC.md"),
             ]
         )
         let registryV1 = TechPackRegistry(packs: [packV1])
@@ -597,26 +556,8 @@ struct StaleArtifactCleanupTests {
             identifier: "my-pack",
             displayName: "My Pack",
             components: [
-                ComponentDefinition(
-                    id: "my-pack.skillA",
-                    displayName: "Skill A",
-                    description: "First skill",
-                    type: .skill,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .copyPackFile(source: skillA, destination: "skillA.md", fileType: .skill)
-                ),
-                ComponentDefinition(
-                    id: "my-pack.skillD",
-                    displayName: "Skill D",
-                    description: "Fourth skill (replaced C)",
-                    type: .skill,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .copyPackFile(source: skillD, destination: "skillD.md", fileType: .skill)
-                ),
+                bed.skillComponent(pack: "my-pack", id: "skillA", source: skillA, destination: "skillA.md"),
+                bed.skillComponent(pack: "my-pack", id: "skillD", source: skillD, destination: "skillD.md"),
             ]
         )
         let registryV2 = TechPackRegistry(packs: [packV2])
@@ -640,8 +581,7 @@ struct StaleArtifactCleanupTests {
         #expect(!artifacts.files.contains { $0.contains("skillC.md") })
 
         // === Doctor passes ===
-        var runner = bed.makeDoctorRunner(registry: registryV2)
-        try runner.run()
+        try bed.runDoctor(registry: registryV2)
     }
 }
 
@@ -659,31 +599,8 @@ struct TemplateDependencyFilteringTests {
             identifier: "my-pack",
             displayName: "My Pack",
             components: [
-                ComponentDefinition(
-                    id: "my-pack.serena",
-                    displayName: "Serena",
-                    description: "Serena MCP server",
-                    type: .mcpServer,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "serena", command: "npx",
-                        args: ["-y", "serena"], env: [:]
-                    ))
-                ),
-                ComponentDefinition(
-                    id: "my-pack.hook",
-                    displayName: "Hook",
-                    description: "A hook",
-                    type: .hookFile,
-                    packIdentifier: "my-pack",
-                    dependencies: [],
-                    isRequired: true,
-                    installAction: .copyPackFile(
-                        source: hookSource, destination: "hook.sh", fileType: .hook
-                    )
-                ),
+                bed.mcpComponent(pack: "my-pack", id: "serena", name: "serena", args: ["-y", "serena"], isRequired: false),
+                bed.hookComponent(pack: "my-pack", id: "hook", source: hookSource, destination: "hook.sh"),
             ],
             templates: [
                 TemplateContribution(
@@ -751,30 +668,8 @@ struct GlobalScopeExclusionTests {
             identifier: "global-pack",
             displayName: "Global Pack",
             components: [
-                ComponentDefinition(
-                    id: "global-pack.hookA",
-                    displayName: "Global Hook A",
-                    description: "First global hook",
-                    type: .hookFile,
-                    packIdentifier: "global-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(
-                        source: hookA, destination: "globalA.sh", fileType: .hook
-                    )
-                ),
-                ComponentDefinition(
-                    id: "global-pack.hookB",
-                    displayName: "Global Hook B",
-                    description: "Second global hook",
-                    type: .hookFile,
-                    packIdentifier: "global-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(
-                        source: hookB, destination: "globalB.sh", fileType: .hook
-                    )
-                ),
+                bed.hookComponent(pack: "global-pack", id: "hookA", source: hookA, destination: "globalA.sh", isRequired: false),
+                bed.hookComponent(pack: "global-pack", id: "hookB", source: hookB, destination: "globalB.sh", isRequired: false),
             ]
         )
         let registry = TechPackRegistry(packs: [pack])
@@ -804,16 +699,15 @@ struct GlobalScopeExclusionTests {
         #expect(excluded.contains("global-pack.hookA"))
 
         // === Step 3: Doctor with globalOnly runs without error ===
-        var runner = bed.makeGlobalDoctorRunner(registry: registry)
-        try runner.run()
+        try bed.runGlobalDoctor(registry: registry)
     }
 }
 
-// MARK: - Scenario 9: Doctor Fix Restores Outdated Section Content
+// MARK: - Scenario 9: Re-sync Restores Tampered Section Content
 
-struct DoctorFixSectionTests {
-    @Test("Doctor fix restores tampered section content")
-    func doctorFixRestoresSection() throws {
+struct SectionRestorationTests {
+    @Test("Re-sync restores tampered section content")
+    func reSyncRestoresTamperedSection() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
