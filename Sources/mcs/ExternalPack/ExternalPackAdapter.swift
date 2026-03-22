@@ -157,7 +157,7 @@ struct ExternalPackAdapter: TechPack {
         let path = packPath
         let supplementary: @Sendable (URL?, Environment) -> [any DoctorCheck] = { projectRoot, environment in
             guard let checks = checksDefinitions else { return [] }
-            return checks.compactMap {
+            return checks.map {
                 ExternalDoctorCheckFactory.makeCheck(
                     from: $0, packPath: path, projectRoot: projectRoot,
                     scriptRunner: runner, environment: environment

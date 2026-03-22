@@ -77,17 +77,18 @@ struct ComponentDefinition: Identifiable {
         installAction: ComponentInstallAction,
         supplementaryChecks checks: [any DoctorCheck]
     ) {
-        self.id = id
-        self.displayName = displayName
-        self.description = description
-        self.type = type
-        self.packIdentifier = packIdentifier
-        self.dependencies = dependencies
-        self.isRequired = isRequired
-        self.hookEvent = hookEvent
-        self.installAction = installAction
-        let captured = checks
-        supplementaryChecks = { _, _ in captured }
+        self.init(
+            id: id,
+            displayName: displayName,
+            description: description,
+            type: type,
+            packIdentifier: packIdentifier,
+            dependencies: dependencies,
+            isRequired: isRequired,
+            hookEvent: hookEvent,
+            installAction: installAction,
+            supplementaryChecks: { _, _ in checks }
+        )
     }
     #endif
 }
