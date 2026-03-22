@@ -108,7 +108,8 @@ private struct LifecycleTestBed {
 
     func hookComponent(
         pack: String, id: String, source: URL, destination: String,
-        hookEvent: String? = nil, isRequired: Bool = true
+        hookEvent: String? = nil, isRequired: Bool = true,
+        hookTimeout: Int? = nil, hookAsync: Bool? = nil, hookStatusMessage: String? = nil
     ) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -119,6 +120,9 @@ private struct LifecycleTestBed {
             dependencies: [],
             isRequired: isRequired,
             hookEvent: hookEvent,
+            hookTimeout: hookTimeout,
+            hookAsync: hookAsync,
+            hookStatusMessage: hookStatusMessage,
             installAction: .copyPackFile(source: source, destination: destination, fileType: .hook)
         )
     }
@@ -746,5 +750,84 @@ struct SectionRestorationTests {
         let restoredContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
         #expect(restoredContent.contains("Original content that should be preserved."))
         #expect(!restoredContent.contains("TAMPERED by user."))
+    }
+}
+
+// MARK: - Scenario 7: Hook Handler Metadata
+
+struct HookMetadataLifecycleTests {
+    @Test("Hook handler fields flow end-to-end into settings.local.json")
+    func hookMetadataEndToEnd() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "lint.sh")
+
+        let pack = MockTechPack(
+            identifier: "meta-pack",
+            displayName: "Meta Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "meta-pack", id: "lint",
+                    source: hookSource, destination: "lint.sh",
+                    hookEvent: "PostToolUse",
+                    hookTimeout: 30, hookAsync: true,
+                    hookStatusMessage: "Running lint..."
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // === Configure ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // === Verify settings.local.json contains hook handler fields ===
+        let data = try Data(contentsOf: bed.settingsLocalPath)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let hooks = try #require(json["hooks"] as? [String: Any])
+        let postToolGroups = try #require(hooks["PostToolUse"] as? [[String: Any]])
+        let firstGroup = try #require(postToolGroups.first)
+        let hookEntries = try #require(firstGroup["hooks"] as? [[String: Any]])
+        let entry = try #require(hookEntries.first)
+
+        #expect(entry["command"] as? String == "bash .claude/hooks/lint.sh")
+        #expect(entry["timeout"] as? Int == 30)
+        #expect(entry["async"] as? Bool == true)
+        #expect(entry["statusMessage"] as? String == "Running lint...")
+
+        // === Doctor passes with metadata present ===
+        try bed.runDoctor(registry: registry)
+    }
+
+    @Test("Hook without metadata produces clean entries (no null fields)")
+    func hookWithoutMetadataNoNulls() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "guard.sh")
+
+        let pack = MockTechPack(
+            identifier: "plain-pack",
+            displayName: "Plain Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "plain-pack", id: "guard",
+                    source: hookSource, destination: "guard.sh",
+                    hookEvent: "PreToolUse"
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // Read raw JSON to verify no null fields leak through
+        let data = try Data(contentsOf: bed.settingsLocalPath)
+        let rawJSON = try #require(String(data: data, encoding: .utf8))
+        #expect(!rawJSON.contains("\"timeout\""))
+        #expect(!rawJSON.contains("\"async\""))
+        #expect(!rawJSON.contains("\"statusMessage\""))
     }
 }

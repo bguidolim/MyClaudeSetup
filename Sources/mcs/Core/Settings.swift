@@ -25,6 +25,15 @@ struct Settings: Codable {
     struct HookEntry: Codable {
         var type: String?
         var command: String?
+        var timeout: Int?
+        var isAsync: Bool?
+        var statusMessage: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type, command, timeout
+            case isAsync = "async"
+            case statusMessage
+        }
     }
 
     // MARK: - Initializers
@@ -64,10 +73,21 @@ struct Settings: Codable {
     // MARK: - Hook Helpers
 
     /// Add a hook entry for the given event, deduplicated by command.
+    /// If a group with the same command already exists, the call is a no-op
+    /// (first-write-wins for metadata like timeout/async/statusMessage).
     /// Returns `true` if the entry was added (not a duplicate).
     @discardableResult
-    mutating func addHookEntry(event: String, command: String) -> Bool {
-        let entry = HookEntry(type: "command", command: command)
+    mutating func addHookEntry(
+        event: String,
+        command: String,
+        timeout: Int? = nil,
+        isAsync: Bool? = nil,
+        statusMessage: String? = nil
+    ) -> Bool {
+        let entry = HookEntry(
+            type: "command", command: command,
+            timeout: timeout, isAsync: isAsync, statusMessage: statusMessage
+        )
         let group = HookGroup(matcher: nil, hooks: [entry])
         var existing = hooks ?? [:]
         var groups = existing[event] ?? []

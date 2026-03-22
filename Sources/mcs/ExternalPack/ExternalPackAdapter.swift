@@ -174,6 +174,9 @@ struct ExternalPackAdapter: TechPack {
             dependencies: ext.dependencies ?? [],
             isRequired: ext.isRequired ?? false,
             hookEvent: ext.hookEvent,
+            hookTimeout: ext.hookTimeout,
+            hookAsync: ext.hookAsync,
+            hookStatusMessage: ext.hookStatusMessage,
             installAction: action,
             supplementaryChecks: supplementary
         )

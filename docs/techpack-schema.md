@@ -36,6 +36,9 @@ These fields are available on every component, regardless of which shorthand key
 | `dependencies` | `[String]` | No | Component IDs this depends on. Short form auto-prefixed |
 | `isRequired` | `Boolean` | No | If `true`, cannot be deselected in `--customize` mode |
 | `hookEvent` | `String` | No | Claude Code event for hook components |
+| `hookTimeout` | `Integer` | No | Seconds before canceling the hook (defaults: 600 command, 30 prompt, 60 agent) |
+| `hookAsync` | `Boolean` | No | If `true`, runs the hook in the background without blocking |
+| `hookStatusMessage` | `String` | No | Custom spinner message displayed while the hook runs |
 | `doctorChecks` | `[DoctorCheck]` | No | Custom health checks (see [Doctor Checks](#doctor-checks)) |
 
 ### Shorthand Keys
@@ -117,6 +120,9 @@ Infers: `type: plugin`, `installAction: plugin`
 - id: session-hook
   description: Session start hook
   hookEvent: SessionStart
+  hookTimeout: 30
+  hookAsync: true
+  hookStatusMessage: "Initializing session..."
   hook:
     source: hooks/session_start.sh
     destination: session_start.sh
@@ -127,7 +133,7 @@ Infers: `type: plugin`, `installAction: plugin`
 | `source` | `String` | Yes | Path to script in the pack repo |
 | `destination` | `String` | Yes | Filename in `<project>/.claude/hooks/` |
 
-Use with `hookEvent` to register the hook in `settings.local.json`.
+Use with `hookEvent` to register the hook in `settings.local.json`. The optional `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map directly to Claude Code's hook handler fields (`timeout`, `async`, `statusMessage`).
 
 Infers: `type: hookFile`, `installAction: copyPackFile(fileType: hook)`
 
@@ -499,6 +505,8 @@ components:
   - id: session-hook
     description: Shows npm outdated on session start
     hookEvent: SessionStart
+    hookTimeout: 15
+    hookStatusMessage: "Checking outdated packages..."
     hook:
       source: hooks/session_start.sh
       destination: session_start.sh

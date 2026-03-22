@@ -26,6 +26,7 @@ Only check items that apply to this PR. Delete irrelevant ones.
 - [ ] `.shellCommand` components have `supplementaryDoctorChecks` defined (`deriveDoctorCheck()` returns `nil` for shell actions)
 - [ ] Any `fix()` implementation does cleanup/migration only — never installs or registers resources
 - [ ] State migrations are guarded by `isNeeded()` to stay idempotent with `mcs sync`
+- [ ] Integration tests updated for new features (`LifecycleIntegrationTests` or `DoctorRunnerIntegrationTests`)
 - [ ] New file write/copy/delete paths use `PathContainment.safePath()` and handle the `nil` (escape) case
 - [ ] Docs updated if behavior changed (`CLAUDE.md`, `docs/`, `techpack.yaml` schema in `ExternalPackManifest.swift`)
 

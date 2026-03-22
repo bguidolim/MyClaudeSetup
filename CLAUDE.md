@@ -154,6 +154,8 @@ swiftlint --fix
 - Run a single test class: `swift test --filter MCSTests.FooTests`
 - Tests construct all state inline; no external fixtures or shared setup
 - **Important**: `swift test` output does not display in Claude Code's terminal. Redirect to a file and read it: `swift test > .test-output/results.txt 2>&1` then read `.test-output/results.txt`
+- **Integration tests are mandatory for new features** that touch components, settings composition, hook entries, or doctor checks — add cases to `LifecycleIntegrationTests.swift` (sync → doctor lifecycle) or `DoctorRunnerIntegrationTests.swift` (doctor-specific flows)
+- Integration tests use `LifecycleTestBed` for sandbox setup — see existing tests for the pattern
 
 ## Git
 

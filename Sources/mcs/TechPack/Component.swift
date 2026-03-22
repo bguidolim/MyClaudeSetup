@@ -35,6 +35,9 @@ struct ComponentDefinition: Identifiable {
     /// Claude Code hook event name (e.g. "SessionStart") for hookFile components.
     /// When set, the engine auto-registers this hook in settings.local.json.
     let hookEvent: String?
+    let hookTimeout: Int?
+    let hookAsync: Bool?
+    let hookStatusMessage: String?
     let installAction: ComponentInstallAction
 
     /// Additional doctor checks that cannot be auto-derived from installAction.
@@ -52,6 +55,9 @@ struct ComponentDefinition: Identifiable {
         dependencies: [String],
         isRequired: Bool,
         hookEvent: String? = nil,
+        hookTimeout: Int? = nil,
+        hookAsync: Bool? = nil,
+        hookStatusMessage: String? = nil,
         installAction: ComponentInstallAction,
         supplementaryChecks: @escaping SupplementaryCheckFactory = { _, _ in [] }
     ) {
@@ -63,6 +69,9 @@ struct ComponentDefinition: Identifiable {
         self.dependencies = dependencies
         self.isRequired = isRequired
         self.hookEvent = hookEvent
+        self.hookTimeout = hookTimeout
+        self.hookAsync = hookAsync
+        self.hookStatusMessage = hookStatusMessage
         self.installAction = installAction
         self.supplementaryChecks = supplementaryChecks
     }
@@ -78,6 +87,9 @@ struct ComponentDefinition: Identifiable {
         dependencies: [String],
         isRequired: Bool,
         hookEvent: String? = nil,
+        hookTimeout: Int? = nil,
+        hookAsync: Bool? = nil,
+        hookStatusMessage: String? = nil,
         installAction: ComponentInstallAction,
         supplementaryChecks checks: [any DoctorCheck]
     ) {
@@ -90,6 +102,9 @@ struct ComponentDefinition: Identifiable {
             dependencies: dependencies,
             isRequired: isRequired,
             hookEvent: hookEvent,
+            hookTimeout: hookTimeout,
+            hookAsync: hookAsync,
+            hookStatusMessage: hookStatusMessage,
             installAction: installAction,
             supplementaryChecks: { _, _ in checks }
         )
