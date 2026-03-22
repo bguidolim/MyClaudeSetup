@@ -204,7 +204,6 @@ struct ExternalPackAdapterTests {
                 type: .configuration,
                 dependencies: nil,
                 isRequired: true,
-
                 installAction: .gitignoreEntries(entries: [".test"]),
                 doctorChecks: nil
             ),

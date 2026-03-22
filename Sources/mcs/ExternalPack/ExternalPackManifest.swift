@@ -395,7 +395,7 @@ struct ExternalComponentDefinition: Codable {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
                         codingPath: container.codingPath,
-                        debugDescription: "hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
+                        debugDescription: "Component '\(id)': hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
                     )
                 )
             }
