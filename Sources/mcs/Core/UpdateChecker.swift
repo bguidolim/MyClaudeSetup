@@ -241,7 +241,7 @@ struct UpdateChecker {
         guard !result.isEmpty else { return false }
 
         if isHook {
-            output.plain("The following mcs updates are available. Please inform the user:")
+            output.plain("[mcs] IMPORTANT: Updates are available. Notify the user about these updates before proceeding with their request:")
         }
 
         if let cli = result.cliUpdate {
