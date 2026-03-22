@@ -308,6 +308,8 @@ struct ExternalComponentDefinition: Codable {
     let isRequired: Bool?
     /// Claude Code hook event name (e.g. "SessionStart", "PreToolUse") for `hookFile` components.
     /// When set, the engine auto-registers this hook in `settings.local.json`.
+    /// The `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map to
+    /// the corresponding Claude Code hook handler fields on the emitted entry.
     let hookEvent: String?
     let hookTimeout: Int?
     let hookAsync: Bool?

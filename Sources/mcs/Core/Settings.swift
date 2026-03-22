@@ -73,9 +73,9 @@ struct Settings: Codable {
     // MARK: - Hook Helpers
 
     /// Add a hook entry for the given event, deduplicated by command.
-    /// If a group with the same command already exists, the call is a no-op
-    /// (first-write-wins for metadata like timeout/async/statusMessage).
-    /// Returns `true` if the entry was added (not a duplicate).
+    /// If a group with the same command already exists but metadata differs
+    /// (timeout/async/statusMessage), the existing entry is replaced in place.
+    /// Returns `true` if the entry was added or updated.
     @discardableResult
     mutating func addHookEntry(
         event: String,
@@ -91,7 +91,17 @@ struct Settings: Codable {
         let group = HookGroup(matcher: nil, hooks: [entry])
         var existing = hooks ?? [:]
         var groups = existing[event] ?? []
-        guard !groups.contains(where: { $0.hooks?.first?.command == command }) else {
+        if let index = groups.firstIndex(where: { $0.hooks?.first?.command == command }) {
+            let old = groups[index].hooks?.first
+            let metadataChanged = old?.timeout != timeout
+                || old?.isAsync != isAsync
+                || old?.statusMessage != statusMessage
+            if metadataChanged {
+                groups[index] = group
+                existing[event] = groups
+                hooks = existing
+                return true
+            }
             return false
         }
         groups.append(group)

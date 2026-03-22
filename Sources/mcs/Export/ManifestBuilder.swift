@@ -640,4 +640,8 @@ struct YAMLRenderer {
     mutating func keyValue(_ key: String, _ value: Int) {
         lines.append("\(key): \(value)")
     }
+
+    mutating func keyValue(_ key: String, _ value: Bool) {
+        lines.append("\(key): \(value)")
+    }
 }

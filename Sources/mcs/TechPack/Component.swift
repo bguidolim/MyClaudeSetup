@@ -34,6 +34,8 @@ struct ComponentDefinition: Identifiable {
     let isRequired: Bool // If true, always installed with its pack/core
     /// Claude Code hook event name (e.g. "SessionStart") for hookFile components.
     /// When set, the engine auto-registers this hook in settings.local.json.
+    /// The `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map to
+    /// the corresponding Claude Code hook handler fields on the emitted entry.
     let hookEvent: String?
     let hookTimeout: Int?
     let hookAsync: Bool?
