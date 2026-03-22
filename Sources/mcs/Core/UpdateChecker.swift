@@ -241,19 +241,30 @@ struct UpdateChecker {
         guard !result.isEmpty else { return false }
 
         if isHook {
+            // Hook mode: plain text only (no ANSI codes) — stdout is injected into Claude's context
             output.plain("[mcs] IMPORTANT: Updates are available. Notify the user about these updates before proceeding with their request:")
-        }
-
-        if let cli = result.cliUpdate {
-            output.warn(
-                "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                    + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
-            )
-        }
-
-        if !result.packUpdates.isEmpty {
-            let noun = result.packUpdates.count == 1 ? "pack has" : "packs have"
-            output.info("\(result.packUpdates.count) \(noun) updates available. Run 'mcs pack update' to update.")
+            if let cli = result.cliUpdate {
+                output.plain(
+                    "- mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
+                        + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+                )
+            }
+            if !result.packUpdates.isEmpty {
+                let noun = result.packUpdates.count == 1 ? "pack has" : "packs have"
+                output.plain("- \(result.packUpdates.count) \(noun) updates available. Run 'mcs pack update' to update.")
+            }
+        } else {
+            // User-invoked: colored output for terminal readability
+            if let cli = result.cliUpdate {
+                output.warn(
+                    "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
+                        + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+                )
+            }
+            if !result.packUpdates.isEmpty {
+                let noun = result.packUpdates.count == 1 ? "pack has" : "packs have"
+                output.info("\(result.packUpdates.count) \(noun) updates available. Run 'mcs pack update' to update.")
+            }
         }
 
         return true
