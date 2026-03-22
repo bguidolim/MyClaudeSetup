@@ -147,7 +147,8 @@ mcs check-updates --json         # Machine-readable JSON output
 **How it works:**
 - **Pack checks**: Runs `git ls-remote` per pack to compare the remote HEAD against the local commit SHA. Local packs are skipped.
 - **CLI version check**: Queries `git ls-remote --tags` on the mcs repository and compares the latest CalVer tag against the installed version.
-- **Cooldown**: The `--hook` flag respects a 7-day cooldown (tracked via `~/.mcs/last-update-check`). Without `--hook`, checks always run — `mcs check-updates`, `mcs sync`, and `mcs doctor` never skip.
+- **Cache**: Results are cached in `~/.mcs/update-check.json` (timestamp + results). In `--hook` mode, cached results are served on every session start; network checks only run when the cache is older than 7 days. User-invoked checks always refresh the cache.
+- **Cache invalidation**: `mcs pack update` deletes the cache so the next hook re-checks. CLI version cache self-invalidates when the user upgrades mcs.
 - **Scope**: Checks global packs plus packs configured in the current project (detected via project root). Packs not relevant to the current context are skipped.
 - **Offline resilience**: Network failures are silently ignored — the command never errors on connectivity issues.
 
