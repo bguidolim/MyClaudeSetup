@@ -621,4 +621,151 @@ struct SettingsMergeTests {
         let result = try #require(JSONSerialization.jsonObject(with: resultData) as? [String: String])
         #expect(result["key"] == "val")
     }
+
+    // MARK: - HookEntry handler fields
+
+    @Test("HookEntry round-trips timeout, async, and statusMessage through JSON")
+    func hookEntryRoundTrip() throws {
+        let entry = Settings.HookEntry(
+            type: "command", command: "bash lint.sh",
+            timeout: 30, isAsync: true, statusMessage: "Linting..."
+        )
+        let data = try JSONEncoder().encode(entry)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        // Verify JSON key is "async" not "isAsync"
+        #expect(json["async"] as? Bool == true)
+        #expect(json["isAsync"] == nil)
+        #expect(json["timeout"] as? Int == 30)
+        #expect(json["statusMessage"] as? String == "Linting...")
+
+        let decoded = try JSONDecoder().decode(Settings.HookEntry.self, from: data)
+        #expect(decoded.type == "command")
+        #expect(decoded.command == "bash lint.sh")
+        #expect(decoded.timeout == 30)
+        #expect(decoded.isAsync == true)
+        #expect(decoded.statusMessage == "Linting...")
+    }
+
+    @Test("HookEntry without new fields decodes with nil (backward compat)")
+    func hookEntryBackwardCompat() throws {
+        let json = """
+        { "type": "command", "command": "echo hi" }
+        """
+        let entry = try JSONDecoder().decode(Settings.HookEntry.self, from: Data(json.utf8))
+        #expect(entry.type == "command")
+        #expect(entry.command == "echo hi")
+        #expect(entry.timeout == nil)
+        #expect(entry.isAsync == nil)
+        #expect(entry.statusMessage == nil)
+    }
+
+    @Test("addHookEntry passes through timeout, async, and statusMessage")
+    func addHookEntryWithMetadata() throws {
+        var settings = Settings()
+        settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 60, isAsync: false, statusMessage: "Running lint..."
+        )
+
+        let groups = settings.hooks?["PostToolUse"] ?? []
+        let entry = try #require(groups.first?.hooks?.first)
+        #expect(entry.timeout == 60)
+        #expect(entry.isAsync == false)
+        #expect(entry.statusMessage == "Running lint...")
+    }
+
+    @Test("addHookEntry updates metadata in place when command matches")
+    func addHookEntryUpdateInPlace() throws {
+        var settings = Settings()
+        // First add
+        let added = settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 30, statusMessage: "Linting v1..."
+        )
+        #expect(added == true)
+
+        // Re-add same command with different metadata
+        let updated = settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 60, isAsync: true, statusMessage: "Linting v2..."
+        )
+        #expect(updated == true)
+
+        // Should still be one group, not two
+        let groups = settings.hooks?["PostToolUse"] ?? []
+        #expect(groups.count == 1)
+
+        let entry = try #require(groups.first?.hooks?.first)
+        #expect(entry.timeout == 60)
+        #expect(entry.isAsync == true)
+        #expect(entry.statusMessage == "Linting v2...")
+    }
+
+    @Test("addHookEntry returns false when command and metadata are identical")
+    func addHookEntryNoOpWhenIdentical() {
+        var settings = Settings()
+        settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 30, statusMessage: "Linting..."
+        )
+        let result = settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 30, statusMessage: "Linting..."
+        )
+        #expect(result == false)
+        #expect(settings.hooks?["PostToolUse"]?.count == 1)
+    }
+
+    @Test("merge preserves existing hook metadata (existing-wins semantics)")
+    func mergeHookExistingWins() throws {
+        var base = Settings(hooks: [
+            "PostToolUse": [
+                Settings.HookGroup(matcher: nil, hooks: [
+                    Settings.HookEntry(type: "command", command: "bash lint.sh", timeout: 30),
+                ]),
+            ],
+        ])
+        let other = Settings(hooks: [
+            "PostToolUse": [
+                Settings.HookGroup(matcher: nil, hooks: [
+                    Settings.HookEntry(
+                        type: "command", command: "bash lint.sh",
+                        timeout: 60, isAsync: true, statusMessage: "New message"
+                    ),
+                ]),
+            ],
+        ])
+
+        base.merge(with: other)
+
+        let groups = base.hooks?["PostToolUse"] ?? []
+        #expect(groups.count == 1)
+        let entry = try #require(groups.first?.hooks?.first)
+        // Existing wins — metadata from `other` is not applied
+        #expect(entry.timeout == 30)
+        #expect(entry.isAsync == nil)
+        #expect(entry.statusMessage == nil)
+    }
+
+    @Test("HookEntry fields survive full Settings save/load round-trip")
+    func hookEntrySettingsRoundTrip() throws {
+        let tmpDir = try Self.makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let file = tmpDir.appendingPathComponent("settings.json")
+
+        var settings = Settings()
+        settings.addHookEntry(
+            event: "SessionStart", command: "bash init.sh",
+            timeout: 15, isAsync: true, statusMessage: "Initializing..."
+        )
+        try settings.save(to: file)
+
+        let loaded = try Settings.load(from: file)
+        let entry = try #require(loaded.hooks?["SessionStart"]?.first?.hooks?.first)
+        #expect(entry.command == "bash init.sh")
+        #expect(entry.timeout == 15)
+        #expect(entry.isAsync == true)
+        #expect(entry.statusMessage == "Initializing...")
+    }
 }

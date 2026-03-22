@@ -199,7 +199,13 @@ enum ConfiguratorSupport {
                    let hookEvent = component.hookEvent,
                    case let .copyPackFile(_, destination, .hook) = component.installAction {
                     let command = "\(hookCommandPrefix)\(destination)"
-                    if settings.addHookEntry(event: hookEvent, command: command) {
+                    if settings.addHookEntry(
+                        event: hookEvent,
+                        command: command,
+                        timeout: component.hookTimeout,
+                        isAsync: component.hookAsync,
+                        statusMessage: component.hookStatusMessage
+                    ) {
                         hasContent = true
                     }
                 }

@@ -1962,6 +1962,75 @@ struct ExternalPackManifestTests {
         }
     }
 
+    @Test("Validation rejects negative hookTimeout")
+    func rejectNegativeHookTimeout() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: hook
+            description: A hook
+            hookEvent: SessionStart
+            hookTimeout: -5
+            hook:
+              source: hooks/test.sh
+              destination: test.sh
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let raw = try ExternalPackManifest.load(from: file)
+        let manifest = try raw.normalized()
+
+        #expect(throws: ManifestError.invalidHookMetadata(
+            componentID: "my-pack.hook",
+            reason: "hookTimeout must be positive (got -5)"
+        )) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("Validation rejects hook metadata without hookEvent")
+    func rejectHookMetadataWithoutEvent() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.node
+            description: Node.js
+            type: brewPackage
+            hookTimeout: 30
+            installAction:
+              type: brewInstall
+              package: node
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+
+        #expect(throws: ManifestError.invalidHookMetadata(
+            componentID: "my-pack.node",
+            reason: "hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
+        )) {
+            try manifest.validate()
+        }
+    }
+
     // MARK: - Shorthand: brew
 
     @Test("Shorthand brew: infers brewPackage type and brewInstall action")
@@ -2209,6 +2278,73 @@ struct ExternalPackManifestTests {
         #expect(config.source == "hooks/session_start.sh")
         #expect(config.destination == "session_start.sh")
         #expect(config.fileType == .hook)
+    }
+
+    @Test("Shorthand hook with handler metadata: timeout, async, statusMessage")
+    func shorthandHookWithMetadata() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.lint-hook
+            description: Lint hook with metadata
+            hookEvent: PostToolUse
+            hookTimeout: 30
+            hookAsync: true
+            hookStatusMessage: "Running lint..."
+            hook:
+              source: hooks/lint.sh
+              destination: lint.sh
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        let comp = try #require(manifest.components?.first)
+
+        #expect(comp.hookEvent == "PostToolUse")
+        #expect(comp.hookTimeout == 30)
+        #expect(comp.hookAsync == true)
+        #expect(comp.hookStatusMessage == "Running lint...")
+        #expect(comp.type == .hookFile)
+    }
+
+    @Test("Hook handler metadata fields are nil when not specified")
+    func hookMetadataFieldsNilWhenAbsent() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.session-start
+            description: Plain hook
+            hookEvent: SessionStart
+            hook:
+              source: hooks/session_start.sh
+              destination: session_start.sh
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        let comp = try #require(manifest.components?.first)
+
+        #expect(comp.hookTimeout == nil)
+        #expect(comp.hookAsync == nil)
+        #expect(comp.hookStatusMessage == nil)
     }
 
     // MARK: - Shorthand: command

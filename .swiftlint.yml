@@ -25,3 +25,6 @@ function_parameter_count:
 large_tuple:
   warning: 4
   error: 6
+
+nesting:
+  type_level: 2

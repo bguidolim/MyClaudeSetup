@@ -212,6 +212,9 @@ struct ManifestBuilder {
                     description: spec.descriptionFor(file),
                     type: spec.componentType,
                     hookEvent: file.hookEvent,
+                    hookTimeout: file.hookTimeout,
+                    hookAsync: file.hookAsync,
+                    hookStatusMessage: file.hookStatusMessage,
                     installAction: .copyPackFile(ExternalCopyPackFileConfig(
                         source: "\(directory)/\(file.filename)",
                         destination: file.filename,
@@ -457,11 +460,20 @@ struct ManifestBuilder {
             yaml.line("    isRequired: true")
         }
 
-        // hookEvent
+        // hookEvent and hook handler fields
         if let hookEvent = comp.hookEvent {
             yaml.line("    hookEvent: \(yamlQuote(hookEvent))")
         } else if comp.type == .hookFile {
             yaml.comment("    TODO: Add hookEvent (e.g. SessionStart, PreToolUse, Stop)", indent: 4)
+        }
+        if let timeout = comp.hookTimeout {
+            yaml.line("    hookTimeout: \(timeout)")
+        }
+        if let hookAsync = comp.hookAsync {
+            yaml.line("    hookAsync: \(hookAsync)")
+        }
+        if let statusMessage = comp.hookStatusMessage {
+            yaml.line("    hookStatusMessage: \(yamlQuote(statusMessage))")
         }
 
         // Install action → shorthand key (exhaustive switch = compile-time safety)
@@ -626,6 +638,10 @@ struct YAMLRenderer {
     }
 
     mutating func keyValue(_ key: String, _ value: Int) {
+        lines.append("\(key): \(value)")
+    }
+
+    mutating func keyValue(_ key: String, _ value: Bool) {
         lines.append("\(key): \(value)")
     }
 }

@@ -75,6 +75,23 @@ extension ExternalPackManifest {
                         )
                     }
                 }
+
+                // Validate hook handler metadata
+                if let timeout = component.hookTimeout, timeout <= 0 {
+                    throw ManifestError.invalidHookMetadata(
+                        componentID: component.id,
+                        reason: "hookTimeout must be positive (got \(timeout))"
+                    )
+                }
+                let hasHookMetadata = component.hookTimeout != nil
+                    || component.hookAsync != nil
+                    || component.hookStatusMessage != nil
+                if hasHookMetadata, component.hookEvent == nil {
+                    throw ManifestError.invalidHookMetadata(
+                        componentID: component.id,
+                        reason: "hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
+                    )
+                }
             }
 
             // Validate intra-pack dependency references resolve to existing component IDs
@@ -242,6 +259,7 @@ enum ManifestError: Error, Equatable, LocalizedError {
     case templateDependencyMismatch(sectionIdentifier: String, componentID: String)
     case unresolvedDependency(componentID: String, dependency: String)
     case invalidHookEvent(componentID: String, hookEvent: String)
+    case invalidHookMetadata(componentID: String, reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -269,6 +287,8 @@ enum ManifestError: Error, Equatable, LocalizedError {
             "Component '\(componentID)' depends on '\(dependency)' which does not exist in the pack"
         case let .invalidHookEvent(componentID, hookEvent):
             "Component '\(componentID)' has unknown hookEvent '\(hookEvent)'"
+        case let .invalidHookMetadata(componentID, reason):
+            "Component '\(componentID)': \(reason)"
         }
     }
 }
@@ -308,7 +328,12 @@ struct ExternalComponentDefinition: Codable {
     let isRequired: Bool?
     /// Claude Code hook event name (e.g. "SessionStart", "PreToolUse") for `hookFile` components.
     /// When set, the engine auto-registers this hook in `settings.local.json`.
+    /// The `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map to
+    /// the corresponding Claude Code hook handler fields on the emitted entry.
     let hookEvent: String?
+    let hookTimeout: Int?
+    let hookAsync: Bool?
+    let hookStatusMessage: String?
     let installAction: ExternalInstallAction
     let doctorChecks: [ExternalDoctorCheckDefinition]?
 
@@ -316,7 +341,9 @@ struct ExternalComponentDefinition: Codable {
 
     /// Standard keys matching stored properties (used by encode).
     enum CodingKeys: String, CodingKey {
-        case id, displayName, description, type, dependencies, isRequired, hookEvent, installAction, doctorChecks
+        case id, displayName, description, type, dependencies, isRequired
+        case hookEvent, hookTimeout, hookAsync, hookStatusMessage
+        case installAction, doctorChecks
     }
 
     /// Shorthand install-action keys that replace `type` + `installAction`.
@@ -343,6 +370,9 @@ struct ExternalComponentDefinition: Codable {
         dependencies: [String]? = nil,
         isRequired: Bool? = nil,
         hookEvent: String? = nil,
+        hookTimeout: Int? = nil,
+        hookAsync: Bool? = nil,
+        hookStatusMessage: String? = nil,
         installAction: ExternalInstallAction,
         doctorChecks: [ExternalDoctorCheckDefinition]? = nil
     ) {
@@ -353,6 +383,9 @@ struct ExternalComponentDefinition: Codable {
         self.dependencies = dependencies
         self.isRequired = isRequired
         self.hookEvent = hookEvent
+        self.hookTimeout = hookTimeout
+        self.hookAsync = hookAsync
+        self.hookStatusMessage = hookStatusMessage
         self.installAction = installAction
         self.doctorChecks = doctorChecks
     }
@@ -368,6 +401,9 @@ struct ExternalComponentDefinition: Codable {
         dependencies = try container.decodeIfPresent([String].self, forKey: .dependencies)
         isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired)
         hookEvent = try container.decodeIfPresent(String.self, forKey: .hookEvent)
+        hookTimeout = try container.decodeIfPresent(Int.self, forKey: .hookTimeout)
+        hookAsync = try container.decodeIfPresent(Bool.self, forKey: .hookAsync)
+        hookStatusMessage = try container.decodeIfPresent(String.self, forKey: .hookStatusMessage)
         doctorChecks = try container.decodeIfPresent([ExternalDoctorCheckDefinition].self, forKey: .doctorChecks)
 
         if let resolved = try Self.resolveShorthand(shorthand, componentId: id) {
@@ -392,6 +428,9 @@ struct ExternalComponentDefinition: Codable {
         try container.encodeIfPresent(dependencies, forKey: .dependencies)
         try container.encodeIfPresent(isRequired, forKey: .isRequired)
         try container.encodeIfPresent(hookEvent, forKey: .hookEvent)
+        try container.encodeIfPresent(hookTimeout, forKey: .hookTimeout)
+        try container.encodeIfPresent(hookAsync, forKey: .hookAsync)
+        try container.encodeIfPresent(hookStatusMessage, forKey: .hookStatusMessage)
         try container.encode(installAction, forKey: .installAction)
         try container.encodeIfPresent(doctorChecks, forKey: .doctorChecks)
     }
