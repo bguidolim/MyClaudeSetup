@@ -199,7 +199,7 @@ struct UpdateChecker {
             return nil
         }
 
-        guard Self.isNewer(candidate: latestTag, than: currentVersion) else {
+        guard VersionCompare.isNewer(candidate: latestTag, than: currentVersion) else {
             return nil
         }
 
@@ -346,7 +346,6 @@ struct UpdateChecker {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        var best: (major: Int, minor: Int, patch: Int)?
         var bestTag: String?
 
         for line in trimmed.split(separator: "\n") {
@@ -358,38 +357,17 @@ struct UpdateChecker {
             guard refPath.hasPrefix(prefix) else { continue }
             let tag = String(refPath.dropFirst(prefix.count))
 
-            guard let parsed = VersionCompare.parse(tag) else { continue }
+            guard VersionCompare.parse(tag) != nil else { continue }
 
-            if let current = best {
-                if parsed.major > current.major
-                    || (parsed.major == current.major && parsed.minor > current.minor)
-                    || (parsed.major == current.major && parsed.minor == current.minor && parsed.patch > current.patch) {
-                    best = parsed
+            if let current = bestTag {
+                if VersionCompare.isNewer(candidate: tag, than: current) {
                     bestTag = tag
                 }
             } else {
-                best = parsed
                 bestTag = tag
             }
         }
 
         return bestTag
-    }
-
-    /// Check if `candidate` version is strictly newer than `current`.
-    static func isNewer(candidate: String, than current: String) -> Bool {
-        guard let candidateParts = VersionCompare.parse(candidate),
-              let currentParts = VersionCompare.parse(current)
-        else {
-            return false
-        }
-
-        if candidateParts.major != currentParts.major {
-            return candidateParts.major > currentParts.major
-        }
-        if candidateParts.minor != currentParts.minor {
-            return candidateParts.minor > currentParts.minor
-        }
-        return candidateParts.patch > currentParts.patch
     }
 }

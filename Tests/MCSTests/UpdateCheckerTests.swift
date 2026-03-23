@@ -201,26 +201,26 @@ struct UpdateCheckerParsingTests {
 struct UpdateCheckerVersionTests {
     @Test("isNewer detects newer version")
     func newerVersion() {
-        #expect(UpdateChecker.isNewer(candidate: "2026.4.1", than: "2026.3.22"))
-        #expect(UpdateChecker.isNewer(candidate: "2027.1.1", than: "2026.12.31"))
-        #expect(UpdateChecker.isNewer(candidate: "2026.3.23", than: "2026.3.22"))
+        #expect(VersionCompare.isNewer(candidate: "2026.4.1", than: "2026.3.22"))
+        #expect(VersionCompare.isNewer(candidate: "2027.1.1", than: "2026.12.31"))
+        #expect(VersionCompare.isNewer(candidate: "2026.3.23", than: "2026.3.22"))
     }
 
     @Test("isNewer returns false for same version")
     func sameVersion() {
-        #expect(!UpdateChecker.isNewer(candidate: "2026.3.22", than: "2026.3.22"))
+        #expect(!VersionCompare.isNewer(candidate: "2026.3.22", than: "2026.3.22"))
     }
 
     @Test("isNewer returns false for older version")
     func olderVersion() {
-        #expect(!UpdateChecker.isNewer(candidate: "2026.3.21", than: "2026.3.22"))
-        #expect(!UpdateChecker.isNewer(candidate: "2025.12.31", than: "2026.1.1"))
+        #expect(!VersionCompare.isNewer(candidate: "2026.3.21", than: "2026.3.22"))
+        #expect(!VersionCompare.isNewer(candidate: "2025.12.31", than: "2026.1.1"))
     }
 
     @Test("isNewer returns false for unparseable versions")
     func unparseable() {
-        #expect(!UpdateChecker.isNewer(candidate: "invalid", than: "2026.3.22"))
-        #expect(!UpdateChecker.isNewer(candidate: "2026.3.22", than: "invalid"))
+        #expect(!VersionCompare.isNewer(candidate: "invalid", than: "2026.3.22"))
+        #expect(!VersionCompare.isNewer(candidate: "2026.3.22", than: "invalid"))
     }
 }
 
