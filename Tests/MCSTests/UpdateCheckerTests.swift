@@ -214,6 +214,118 @@ struct UpdateCheckerVersionTests {
     }
 }
 
+// MARK: - Hook Management Tests
+
+struct UpdateCheckerHookTests {
+    private func makeTmpDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-hook-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("addHook creates SessionStart entry with correct command and metadata")
+    func addHookCreatesEntry() {
+        var settings = Settings()
+        let added = UpdateChecker.addHook(to: &settings)
+        #expect(added)
+
+        let groups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []
+        #expect(groups.count == 1)
+        let entry = groups.first?.hooks?.first
+        #expect(entry?.command == "mcs check-updates --hook")
+        #expect(entry?.timeout == 30)
+        #expect(entry?.statusMessage == "Checking for updates...")
+        #expect(entry?.type == "command")
+    }
+
+    @Test("addHook is idempotent")
+    func addHookIdempotent() {
+        var settings = Settings()
+        UpdateChecker.addHook(to: &settings)
+        let secondAdd = UpdateChecker.addHook(to: &settings)
+        #expect(!secondAdd) // no-op, already present
+        #expect(settings.hooks?[Constants.HookEvent.sessionStart.rawValue]?.count == 1)
+    }
+
+    @Test("removeHook removes the update check entry")
+    func removeHookRemovesEntry() {
+        var settings = Settings()
+        UpdateChecker.addHook(to: &settings)
+        let removed = UpdateChecker.removeHook(from: &settings)
+        #expect(removed)
+        #expect(settings.hooks == nil)
+    }
+
+    @Test("removeHook preserves other SessionStart hooks")
+    func removeHookPreservesOthers() {
+        var settings = Settings()
+        settings.addHookEntry(event: "SessionStart", command: "bash .claude/hooks/startup.sh")
+        UpdateChecker.addHook(to: &settings)
+
+        UpdateChecker.removeHook(from: &settings)
+        let groups = settings.hooks?["SessionStart"] ?? []
+        #expect(groups.count == 1)
+        #expect(groups.first?.hooks?.first?.command == "bash .claude/hooks/startup.sh")
+    }
+
+    @Test("addHook + removeHook round-trip leaves settings clean")
+    func hookRoundTrip() {
+        var settings = Settings()
+        UpdateChecker.addHook(to: &settings)
+        UpdateChecker.removeHook(from: &settings)
+        #expect(settings.hooks == nil)
+    }
+
+    @Test("syncHook adds hook when config enabled")
+    func syncHookAdds() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let env = Environment(home: tmpDir)
+        // Create empty settings.json
+        let claudeDir = tmpDir.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var config = MCSConfig()
+        config.updateCheckPacks = true
+        let output = CLIOutput()
+
+        UpdateChecker.syncHook(config: config, env: env, output: output)
+
+        let settings = try Settings.load(from: env.claudeSettings)
+        let groups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []
+        #expect(groups.count == 1)
+        #expect(groups.first?.hooks?.first?.command == UpdateChecker.hookCommand)
+    }
+
+    @Test("syncHook removes hook when config disabled")
+    func syncHookRemoves() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let env = Environment(home: tmpDir)
+        let claudeDir = tmpDir.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        // Pre-populate with the hook
+        var initial = Settings()
+        UpdateChecker.addHook(to: &initial)
+        try initial.save(to: env.claudeSettings)
+
+        var config = MCSConfig()
+        config.updateCheckPacks = false
+        config.updateCheckCLI = false
+        let output = CLIOutput()
+
+        UpdateChecker.syncHook(config: config, env: env, output: output)
+
+        let settings = try Settings.load(from: env.claudeSettings)
+        #expect(settings.hooks == nil)
+    }
+}
+
 // MARK: - CheckResult Tests
 
 struct UpdateCheckerResultTests {
