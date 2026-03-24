@@ -157,7 +157,7 @@ struct ExternalPackAdapterTests {
         let component = adapter.components[0]
         if case let .copyPackFile(source, destination, fileType) = component.installAction {
             #expect(source == packPath.appendingPathComponent("resources/my-skill"))
-            #expect(destination == "test-pack/my-skill")
+            #expect(destination == "my-skill")
             #expect(fileType == .skill)
         } else {
             Issue.record("Expected .copyPackFile action")
