@@ -190,6 +190,11 @@ private struct LifecycleTestBed {
     var claudeLocalPath: URL {
         project.appendingPathComponent("CLAUDE.local.md")
     }
+
+    /// Derive the expected hook command string for a project-scoped hook destination.
+    func projectHookCommand(_ destination: String) -> String {
+        "bash .claude/hooks/\(destination)"
+    }
 }
 
 // MARK: - Scenario 1: Single-Pack Lifecycle
@@ -246,7 +251,7 @@ struct SinglePackLifecycleTests {
         let settings = try Settings.load(from: bed.settingsLocalPath)
         let postToolGroups = settings.hooks?["PostToolUse"] ?? []
         let hookCommands = postToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
-        #expect(hookCommands.contains("bash .claude/hooks/lint.sh"))
+        #expect(hookCommands.contains(bed.projectHookCommand("lint.sh")))
 
         // Verify MCP server was registered via MockClaudeCLI with local scope
         #expect(bed.mockCLI.mcpAddCalls.contains { $0.name == "test-mcp" && $0.scope == "local" })
@@ -258,7 +263,7 @@ struct SinglePackLifecycleTests {
         #expect(artifacts != nil)
         #expect(artifacts?.templateSections.contains("test-pack") == true)
         #expect(artifacts?.settingsKeys.contains("env") == true)
-        #expect(artifacts?.hookCommands.contains("bash .claude/hooks/lint.sh") == true)
+        #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("lint.sh")) == true)
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
         // === Step 2: Doctor passes ===
@@ -378,6 +383,81 @@ struct MultiPackConvergenceTests {
         let restoredEnv = try bed.settingsEnv()
         #expect(restoredEnv["PACK_A_KEY"] as? String == "valueA")
         #expect(restoredEnv["PACK_B_KEY"] as? String == "valueB")
+    }
+}
+
+// MARK: - Scenario 2b: Cross-Pack File Collision Prevention
+
+struct CrossPackCollisionTests {
+    @Test("Two packs with same hook filename install to distinct namespaced paths")
+    func namespacedHookDestinations() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSourceA = try bed.makeHookSource(name: "lint-a.sh", content: "#!/bin/bash\necho pack-a")
+        let hookSourceB = try bed.makeHookSource(name: "lint-b.sh", content: "#!/bin/bash\necho pack-b")
+
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [
+                bed.hookComponent(
+                    pack: "pack-a", id: "lint",
+                    source: hookSourceA, destination: "pack-a/lint.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse)
+                ),
+            ],
+            templates: []
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            components: [
+                bed.hookComponent(
+                    pack: "pack-b", id: "lint",
+                    source: hookSourceB, destination: "pack-b/lint.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse)
+                ),
+            ],
+            templates: []
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // === Step 1: Configure both packs ===
+        try configurator.configure(packs: [packA, packB], confirmRemovals: false)
+
+        // Verify both files exist at distinct namespaced paths
+        let fileA = bed.project.appendingPathComponent(".claude/hooks/pack-a/lint.sh")
+        let fileB = bed.project.appendingPathComponent(".claude/hooks/pack-b/lint.sh")
+        #expect(FileManager.default.fileExists(atPath: fileA.path))
+        #expect(FileManager.default.fileExists(atPath: fileB.path))
+
+        // Verify both hook commands are registered in settings
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let preToolGroups = settings.hooks?["PreToolUse"] ?? []
+        let hookCommands = preToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(hookCommands.contains(bed.projectHookCommand("pack-a/lint.sh")))
+        #expect(hookCommands.contains(bed.projectHookCommand("pack-b/lint.sh")))
+
+        // Verify artifact records are distinct
+        let state = try bed.projectState()
+        let artifactsA = state.artifacts(for: "pack-a")
+        let artifactsB = state.artifacts(for: "pack-b")
+        #expect(artifactsA?.hookCommands.contains(bed.projectHookCommand("pack-a/lint.sh")) == true)
+        #expect(artifactsB?.hookCommands.contains(bed.projectHookCommand("pack-b/lint.sh")) == true)
+
+        // === Step 2: Remove pack A — pack B's file and hook must survive ===
+        try configurator.configure(packs: [packB], confirmRemovals: false)
+
+        #expect(!FileManager.default.fileExists(atPath: fileA.path))
+        #expect(FileManager.default.fileExists(atPath: fileB.path))
+
+        let afterSettings = try Settings.load(from: bed.settingsLocalPath)
+        let afterGroups = afterSettings.hooks?["PreToolUse"] ?? []
+        let afterCommands = afterGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(!afterCommands.contains(bed.projectHookCommand("pack-a/lint.sh")))
+        #expect(afterCommands.contains(bed.projectHookCommand("pack-b/lint.sh")))
     }
 }
 
@@ -789,7 +869,7 @@ struct HookMetadataLifecycleTests {
         let hookEntries = try #require(firstGroup["hooks"] as? [[String: Any]])
         let entry = try #require(hookEntries.first)
 
-        #expect(entry["command"] as? String == "bash .claude/hooks/lint.sh")
+        #expect(entry["command"] as? String == bed.projectHookCommand("lint.sh"))
         #expect(entry["timeout"] as? Int == 30)
         #expect(entry["async"] as? Bool == true)
         #expect(entry["statusMessage"] as? String == "Running lint...")
