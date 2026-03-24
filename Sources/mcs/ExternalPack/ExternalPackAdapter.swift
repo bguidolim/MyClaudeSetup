@@ -205,6 +205,8 @@ struct ExternalPackAdapter: TechPack {
                 return nil
             }
             let fileType = config.fileType.flatMap { CopyFileType(rawValue: $0.rawValue) } ?? .generic
+            // Skills use directory-based identity in Claude Code — namespacing would create
+            // double nesting that breaks discovery (.claude/skills/<pack>/<skill>/SKILL.md)
             let destination = fileType == .skill
                 ? config.destination
                 : "\(manifest.identifier)/\(config.destination)"

@@ -195,11 +195,6 @@ private struct LifecycleTestBed {
     func projectHookCommand(_ destination: String) -> String {
         "bash .claude/hooks/\(destination)"
     }
-
-    /// Derive the expected hook command string for a global-scoped hook destination.
-    func globalHookCommand(_ destination: String) -> String {
-        "bash ~/.claude/hooks/\(destination)"
-    }
 }
 
 // MARK: - Scenario 1: Single-Pack Lifecycle
