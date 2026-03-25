@@ -1,0 +1,83 @@
+name: Auto Release
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: auto-release
+
+jobs:
+  auto-release:
+    name: Auto Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v6
+        with:
+          ssh-key: ${{ secrets.AUTO_RELEASE_KEY }}
+          fetch-depth: 0
+
+      - name: Calculate version from today's UTC date
+        run: |
+          YEAR=$(date -u +%Y)
+          MONTH=$(date -u +%-m)
+          DAY=$(date -u +%-d)
+          VERSION="${YEAR}.${MONTH}.${DAY}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Calculated version: ${VERSION}"
+
+      - name: Check if tag already exists
+        run: |
+          if git rev-parse "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${VERSION} already exists. Skipping release."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "Tag ${VERSION} does not exist. Proceeding."
+            echo "SKIP=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Find last tag and check for relevant changes
+        if: env.SKIP == 'false'
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tags found. Comparing against root commit."
+            DIFF_BASE=$(git rev-list --max-parents=0 HEAD)
+          else
+            echo "Last tag: ${LAST_TAG}"
+            DIFF_BASE="${LAST_TAG}"
+          fi
+
+          CHANGED=$(git diff --name-only "${DIFF_BASE}..HEAD" -- 'Sources/**/*.swift')
+          if [ -z "$CHANGED" ]; then
+            echo "No production Swift changes since ${DIFF_BASE}. Skipping release."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "Production changes detected since ${DIFF_BASE}:"
+            echo "$CHANGED"
+          fi
+
+      - name: Bump version in CLI.swift
+        if: env.SKIP == 'false'
+        run: |
+          sed -i "s/static let current = \".*\"/static let current = \"${VERSION}\"/" Sources/mcs/CLI.swift
+          echo "Updated MCSVersion.current to ${VERSION}:"
+          grep 'static let current' Sources/mcs/CLI.swift
+
+      - name: Commit version bump
+        if: env.SKIP == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Sources/mcs/CLI.swift
+          git commit -m "Bump version to ${VERSION}"
+
+      - name: Push commit and tag
+        if: env.SKIP == 'false'
+        run: |
+          git push origin main
+          git tag "${VERSION}"
+          git push origin "${VERSION}"
+          echo "Pushed commit and tag ${VERSION}. release.yml will handle the rest."
