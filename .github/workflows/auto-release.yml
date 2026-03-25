@@ -1,0 +1,143 @@
+name: Auto Release
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Preview what would happen without pushing'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: auto-release
+
+jobs:
+  auto-release:
+    name: Auto Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout with full history
+        uses: actions/checkout@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Calculate version from today's UTC date
+        run: |
+          YEAR=$(date -u +%Y)
+          MONTH=$(date -u +%-m)
+          DAY=$(date -u +%-d)
+          VERSION="${YEAR}.${MONTH}.${DAY}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Calculated version: ${VERSION}"
+
+      - name: Check if tag already exists
+        run: |
+          if git rev-parse "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${VERSION} already exists. Skipping release."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "Tag ${VERSION} does not exist. Proceeding."
+            echo "SKIP=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Find last tag and check for relevant changes
+        if: env.SKIP == 'false'
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tags found. Comparing against root commit."
+            DIFF_BASE=$(git rev-list --max-parents=0 HEAD)
+          else
+            echo "Last tag: ${LAST_TAG}"
+            DIFF_BASE="${LAST_TAG}"
+          fi
+          echo "DIFF_BASE=${DIFF_BASE}" >> "$GITHUB_ENV"
+
+          CHANGED=$(git diff --name-only "${DIFF_BASE}..HEAD" -- 'Sources/**/*.swift')
+          if [ -z "$CHANGED" ]; then
+            echo "No production Swift changes since ${DIFF_BASE}. Skipping release."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "Production changes detected since ${DIFF_BASE}:"
+            echo "$CHANGED"
+          fi
+
+      - name: Bump version in CLI.swift
+        if: env.SKIP == 'false'
+        run: |
+          sed -i "s/static let current = \".*\"/static let current = \"${VERSION}\"/" Sources/mcs/CLI.swift
+
+      - name: Release summary
+        if: env.SKIP == 'false'
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          DIFF_BASE: ${{ env.DIFF_BASE }}
+        run: |
+          echo "============================================"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "  DRY RUN — no changes will be pushed"
+          else
+            echo "  RELEASE"
+          fi
+          echo "============================================"
+          echo ""
+          echo "Version:  ${VERSION}"
+          echo "Since:    ${DIFF_BASE:-$(git describe --tags --abbrev=0 2>/dev/null || echo 'root')}"
+          echo "Commit:   $(git rev-parse --short HEAD)"
+          echo ""
+          echo "--- Version bump ---"
+          git diff Sources/mcs/CLI.swift
+          echo ""
+          echo "--- Commits included ---"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            git log --oneline "${LAST_TAG}..HEAD"
+          else
+            git log --oneline
+          fi
+          echo ""
+          echo "--- Changed production files ---"
+          if [ -n "$LAST_TAG" ]; then
+            git diff --stat "${LAST_TAG}..HEAD" -- 'Sources/**/*.swift'
+          else
+            git diff --stat HEAD -- 'Sources/**/*.swift'
+          fi
+          echo ""
+          echo "--- Actions ---"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "SKIPPED: git push origin main"
+            echo "SKIPPED: git tag ${VERSION}"
+            echo "SKIPPED: git push origin ${VERSION}"
+            echo "SKIPPED: release.yml trigger"
+          else
+            echo "WILL: git push origin main"
+            echo "WILL: git tag ${VERSION}"
+            echo "WILL: git push origin ${VERSION}"
+            echo "THEN: release.yml triggers → build → GitHub Release → Homebrew tap"
+          fi
+          echo "============================================"
+
+      - name: Commit version bump
+        if: env.SKIP == 'false' && !inputs.dry-run
+        run: |
+          git add Sources/mcs/CLI.swift
+          git commit -m "Bump version to ${VERSION}"
+
+      - name: Push commit and tag
+        if: env.SKIP == 'false' && !inputs.dry-run
+        run: |
+          git push origin main
+          git tag "${VERSION}"
+          git push origin "${VERSION}"
+          echo "Pushed commit and tag ${VERSION}. release.yml will handle the rest."
