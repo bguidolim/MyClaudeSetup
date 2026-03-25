@@ -69,8 +69,6 @@ jobs:
       - name: Commit version bump
         if: env.SKIP == 'false'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Sources/mcs/CLI.swift
           git commit -m "Bump version to ${VERSION}"
 
