@@ -161,9 +161,9 @@ struct ConfigurationDiscovery {
                 }
             }
         case let .project(projectRoot):
-            // Read project-scoped servers from projects[path].mcpServers
             if let projects = json[Constants.JSONKeys.projects] as? [String: Any],
-               let projectEntry = projects[projectRoot.path] as? [String: Any],
+               let matchedKey = ProjectDetector.resolveProjectKey(from: projectRoot, in: Set(projects.keys)),
+               let projectEntry = projects[matchedKey] as? [String: Any],
                let servers = projectEntry[Constants.JSONKeys.mcpServers] as? [String: Any] {
                 for (name, value) in servers {
                     if let serverDict = value as? [String: Any] {

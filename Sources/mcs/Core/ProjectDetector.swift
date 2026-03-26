@@ -21,6 +21,28 @@ enum ProjectDetector {
         return nil
     }
 
+    /// Walk up from `startingPath` looking for a path that exists in `projectKeys`.
+    /// Stops at (and includes) the first directory containing `.git/`.
+    /// Returns the matching key string, or nil if no match is found.
+    ///
+    /// This resolves the mismatch between `findProjectRoot()` (which may return a
+    /// subdirectory containing CLAUDE.local.md) and the Claude CLI's convention of
+    /// keying project-scoped entries by the git root in `~/.claude.json`.
+    static func resolveProjectKey(from startingPath: URL, in projectKeys: Set<String>) -> String? {
+        let fm = FileManager.default
+        var current = startingPath.standardizedFileURL
+        while current.path != "/" {
+            if projectKeys.contains(current.path) {
+                return current.path
+            }
+            if fm.fileExists(atPath: current.appendingPathComponent(".git").path) {
+                break
+            }
+            current = current.deletingLastPathComponent()
+        }
+        return nil
+    }
+
     /// Convenience: find project root from the current working directory.
     static func findProjectRoot() -> URL? {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

@@ -162,4 +162,69 @@ struct DoctorRunnerIntegrationTests {
         // Should detect the pack from project state
         try runner.run()
     }
+
+    @Test("MCPServerCheck passes via walk-up when project root is a subdirectory of git root")
+    func mcpCheckWalksUpToGitRoot() throws {
+        let home = try makeGlobalTmpDir(label: "runner-walkup")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        // Git root at home/my-repo, project root at home/my-repo/packages/lib
+        let gitRoot = home.appendingPathComponent("my-repo")
+        let subProject = gitRoot.appendingPathComponent("packages/lib")
+        try FileManager.default.createDirectory(
+            at: gitRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: subProject.appendingPathComponent(Constants.FileNames.claudeDirectory),
+            withIntermediateDirectories: true
+        )
+
+        // Pack with an MCP component
+        let mcpComponent = ComponentDefinition(
+            id: "test-pack.my-mcp",
+            displayName: "My MCP",
+            description: "Test MCP server",
+            type: .mcpServer,
+            packIdentifier: "test-pack",
+            dependencies: [],
+            isRequired: true,
+            installAction: .mcpServer(MCPServerConfig(
+                name: "my-mcp", command: "npx", args: ["-y", "my-mcp"], env: [:]
+            ))
+        )
+        let pack = MockTechPack(
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            components: [mcpComponent]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // Record pack in project state at the subdirectory root
+        var state = try ProjectState(projectRoot: subProject)
+        state.recordPack("test-pack")
+        state.setArtifacts(
+            PackArtifactRecord(mcpServers: [MCPServerRef(name: "my-mcp", scope: "local")]),
+            for: "test-pack"
+        )
+        try state.save()
+
+        // Write ~/.claude.json with the server keyed at the git root (as Claude CLI does)
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                gitRoot.path: [
+                    "mcpServers": [
+                        "my-mcp": ["command": "npx", "args": ["-y", "my-mcp"]],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        // DoctorRunner with projectRoot at the subdirectory
+        var runner = makeRunner(home: home, projectRoot: subProject, registry: registry)
+        try runner.run()
+    }
 }

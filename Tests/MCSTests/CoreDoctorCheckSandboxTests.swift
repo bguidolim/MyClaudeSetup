@@ -108,6 +108,118 @@ struct MCPServerCheckSandboxTests {
             return
         }
     }
+
+    @Test("pass when subdirectory project root walks up to find server at git root")
+    func passWalkUpToGitRoot() throws {
+        let home = try makeGlobalTmpDir(label: "mcp-walkup")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let gitRoot = home.appendingPathComponent("my-project")
+        let subProject = gitRoot.appendingPathComponent("packages/lib")
+        try FileManager.default.createDirectory(
+            at: gitRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: subProject, withIntermediateDirectories: true)
+
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                gitRoot.path: [
+                    "mcpServers": [
+                        "serena": ["command": "npx", "args": ["-y", "serena"]],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        let check = MCPServerCheck(
+            name: "Serena", serverName: "serena",
+            projectRoot: subProject, environment: env
+        )
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass (walk-up), got \(result)")
+            return
+        }
+    }
+
+    @Test("walk-up stops at .git boundary and does not escape repo")
+    func walkUpStopsAtGitBoundary() throws {
+        let home = try makeGlobalTmpDir(label: "mcp-boundary")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let outerRepo = home.appendingPathComponent("outer")
+        let innerRepo = outerRepo.appendingPathComponent("inner")
+        try FileManager.default.createDirectory(
+            at: outerRepo.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: innerRepo.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                outerRepo.path: [
+                    "mcpServers": [
+                        "serena": ["command": "npx", "args": ["-y", "serena"]],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        let check = MCPServerCheck(
+            name: "Serena", serverName: "serena",
+            projectRoot: innerRepo, environment: env
+        )
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail (should not escape git boundary), got \(result)")
+            return
+        }
+    }
+
+    @Test("pass when projectRoot equals gitRoot (regression)")
+    func passExactMatchRegression() throws {
+        let home = try makeGlobalTmpDir(label: "mcp-exact")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        try FileManager.default.createDirectory(
+            at: projectRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                projectRoot.path: [
+                    "mcpServers": [
+                        "serena": ["command": "npx", "args": ["-y", "serena"]],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        let check = MCPServerCheck(
+            name: "Serena", serverName: "serena",
+            projectRoot: projectRoot, environment: env
+        )
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass (exact match regression), got \(result)")
+            return
+        }
+    }
 }
 
 // MARK: - PluginCheck Sandbox Tests

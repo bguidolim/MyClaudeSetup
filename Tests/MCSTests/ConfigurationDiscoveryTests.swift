@@ -1,0 +1,126 @@
+import Foundation
+@testable import mcs
+import Testing
+
+struct ConfigurationDiscoveryTests {
+    @Test("discovers MCP servers when project root is a subdirectory of git root")
+    func discoversMCPServersViaWalkUp() throws {
+        let home = try makeGlobalTmpDir(label: "discovery-walkup")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let gitRoot = home.appendingPathComponent("my-repo")
+        let subProject = gitRoot.appendingPathComponent("packages/lib")
+        try FileManager.default.createDirectory(
+            at: gitRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: subProject.appendingPathComponent(Constants.FileNames.claudeDirectory),
+            withIntermediateDirectories: true
+        )
+
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                gitRoot.path: [
+                    "mcpServers": [
+                        "docs-server": [
+                            "command": "npx",
+                            "args": ["-y", "docs-server"],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        let discovery = ConfigurationDiscovery(environment: env, output: CLIOutput())
+        let config = discovery.discover(scope: ConfigurationDiscovery.Scope.project(subProject))
+
+        #expect(config.mcpServers.count == 1)
+        #expect(config.mcpServers.first?.name == "docs-server")
+        #expect(config.mcpServers.first?.scope == "local")
+    }
+
+    @Test("discovers MCP servers when project root equals git root")
+    func discoversMCPServersExactMatch() throws {
+        let home = try makeGlobalTmpDir(label: "discovery-exact")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        try FileManager.default.createDirectory(
+            at: projectRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: projectRoot.appendingPathComponent(Constants.FileNames.claudeDirectory),
+            withIntermediateDirectories: true
+        )
+
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                projectRoot.path: [
+                    "mcpServers": [
+                        "docs-server": [
+                            "command": "npx",
+                            "args": ["-y", "docs-server"],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        let discovery = ConfigurationDiscovery(environment: env, output: CLIOutput())
+        let config = discovery.discover(scope: ConfigurationDiscovery.Scope.project(projectRoot))
+
+        #expect(config.mcpServers.count == 1)
+        #expect(config.mcpServers.first?.name == "docs-server")
+    }
+
+    @Test("returns empty when no MCP servers match subdirectory project")
+    func noMCPServersWhenBoundaryBlocks() throws {
+        let home = try makeGlobalTmpDir(label: "discovery-boundary")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let outerRepo = home.appendingPathComponent("outer")
+        let innerRepo = outerRepo.appendingPathComponent("inner")
+        try FileManager.default.createDirectory(
+            at: outerRepo.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: innerRepo.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: innerRepo.appendingPathComponent(Constants.FileNames.claudeDirectory),
+            withIntermediateDirectories: true
+        )
+
+        // Server is keyed at outer repo, but inner repo has its own .git boundary
+        let claudeJSON: [String: Any] = [
+            "projects": [
+                outerRepo.path: [
+                    "mcpServers": [
+                        "docs-server": [
+                            "command": "npx",
+                            "args": ["-y", "docs-server"],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: claudeJSON)
+        try data.write(to: env.claudeJSON)
+
+        let discovery = ConfigurationDiscovery(environment: env, output: CLIOutput())
+        let config = discovery.discover(scope: ConfigurationDiscovery.Scope.project(innerRepo))
+
+        #expect(config.mcpServers.isEmpty)
+    }
+}
