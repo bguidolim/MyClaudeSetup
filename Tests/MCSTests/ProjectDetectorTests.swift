@@ -80,6 +80,95 @@ struct ProjectDetectorTests {
     }
 }
 
+// MARK: - resolveProjectKey Tests
+
+struct ProjectDetectorResolveKeyTests {
+    private func makeTmpDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-resolvekey-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("Returns matching key when projectRoot equals git root")
+    func exactMatch() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+
+        let keys: Set<String> = [tmpDir.standardizedFileURL.path]
+        let result = ProjectDetector.resolveProjectKey(from: tmpDir, in: keys)
+        #expect(result == tmpDir.standardizedFileURL.path)
+    }
+
+    @Test("Walks up from subdirectory to find key at git root")
+    func walkUpToGitRoot() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        let subDir = tmpDir.appendingPathComponent("packages/my-lib")
+        try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
+
+        let keys: Set<String> = [tmpDir.standardizedFileURL.path]
+        let result = ProjectDetector.resolveProjectKey(from: subDir, in: keys)
+        #expect(result == tmpDir.standardizedFileURL.path)
+    }
+
+    @Test("Stops at git boundary and does not escape the repo")
+    func stopsAtGitBoundary() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let outer = tmpDir.appendingPathComponent("outer")
+        let inner = outer.appendingPathComponent("inner")
+        try FileManager.default.createDirectory(
+            at: outer.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: inner.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+
+        // Key is at outer, but search starts at inner — should NOT find outer
+        let keys: Set<String> = [outer.standardizedFileURL.path]
+        let result = ProjectDetector.resolveProjectKey(from: inner, in: keys)
+        #expect(result == nil)
+    }
+
+    @Test("Returns nil when no key matches")
+    func noMatch() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+
+        let keys: Set = ["/some/other/path"]
+        let result = ProjectDetector.resolveProjectKey(from: tmpDir, in: keys)
+        #expect(result == nil)
+    }
+
+    @Test("Returns nil when project keys set is empty")
+    func emptyKeys() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let result = ProjectDetector.resolveProjectKey(from: tmpDir, in: [])
+        #expect(result == nil)
+    }
+}
+
 struct ProjectStateTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
