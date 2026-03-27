@@ -109,7 +109,7 @@ struct PluginCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        var projectSettingsCorrupt = false
+        var projectSettingsError: String?
 
         // Tier 1: Project-scoped settings.local.json
         if let root = projectRoot {
@@ -123,14 +123,14 @@ struct PluginCheck: DoctorCheck {
                 }
             } catch {
                 // Corrupt project settings — fall through to global, but note for diagnostics
-                projectSettingsCorrupt = true
+                projectSettingsError = error.localizedDescription
             }
         }
 
         // Tier 2: Global settings.json
         let settingsURL = environment.claudeSettings
         guard FileManager.default.fileExists(atPath: settingsURL.path) else {
-            if projectSettingsCorrupt {
+            if projectSettingsError != nil {
                 return .fail("settings.local.json is corrupt and settings.json not found")
             }
             return .fail("settings.json not found")
@@ -142,9 +142,12 @@ struct PluginCheck: DoctorCheck {
             return .fail("settings.json is invalid: \(error.localizedDescription)")
         }
         if settings.enabledPlugins?[pluginRef.bareName] == true {
+            if let errorDesc = projectSettingsError {
+                return .warn("enabled (global) — settings.local.json is unreadable: \(errorDesc)")
+            }
             return .pass("enabled")
         }
-        if projectSettingsCorrupt {
+        if projectSettingsError != nil {
             return .fail("not enabled (settings.local.json is corrupt)")
         }
         return .fail("not enabled")

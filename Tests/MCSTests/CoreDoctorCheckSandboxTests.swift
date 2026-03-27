@@ -393,8 +393,8 @@ struct PluginCheckSandboxTests {
         }
     }
 
-    @Test("pass via global fallback when project settings.local.json is invalid")
-    func passWhenProjectSettingsInvalidFallsBackToGlobal() throws {
+    @Test("warn via global fallback when project settings.local.json is invalid")
+    func warnWhenProjectSettingsInvalidFallsBackToGlobal() throws {
         let home = try makeGlobalTmpDir(label: "plugin-invalid-project")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
@@ -421,11 +421,11 @@ struct PluginCheckSandboxTests {
 
         let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
         let result = check.check()
-        guard case let .pass(msg) = result else {
-            Issue.record("Expected .pass, got \(result)")
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
             return
         }
-        #expect(msg == "enabled")
+        #expect(msg.contains("settings.local.json is unreadable"))
     }
 
     @Test("pass via global when projectRoot set but no settings.local.json exists")
@@ -454,6 +454,92 @@ struct PluginCheckSandboxTests {
             return
         }
         #expect(msg == "enabled")
+    }
+
+    @Test("pass via global when plugin explicitly false in project settings")
+    func passWhenPluginExplicitlyFalseInProject() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-false-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        let projectSettings = """
+        { "enabledPlugins": { "my-plugin": false } }
+        """
+        try projectSettings.write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        let globalSettings = """
+        { "enabledPlugins": { "my-plugin": true } }
+        """
+        try globalSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "enabled")
+    }
+
+    @Test("fail with corrupt message when project settings invalid and no global settings")
+    func failWhenProjectCorruptAndNoGlobal() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-corrupt-no-global")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        try "not valid json".write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .fail(msg) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(msg.contains("settings.local.json is corrupt"))
+        #expect(msg.contains("settings.json not found"))
+    }
+
+    @Test("fail with corrupt message when project settings invalid and plugin not in global")
+    func failWhenProjectCorruptAndPluginNotInGlobal() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-corrupt-not-global")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        try "not valid json".write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        let globalSettings = """
+        { "enabledPlugins": { "other-plugin": true } }
+        """
+        try globalSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .fail(msg) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(msg == "not enabled (settings.local.json is corrupt)")
     }
 }
 
