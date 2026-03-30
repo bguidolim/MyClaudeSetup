@@ -7,7 +7,7 @@ enum PackHeuristics {
         case warning
     }
 
-    struct Finding {
+    struct Finding: Equatable {
         let severity: Severity
         let message: String
     }
@@ -109,11 +109,19 @@ enum PackHeuristics {
             referencedPaths.insert(script)
         }
 
-        guard let rootContents = try? fm.contentsOfDirectory(
-            at: packPath,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
+        let rootContents: [URL]
+        do {
+            rootContents = try fm.contentsOfDirectory(
+                at: packPath,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return [Finding(
+                severity: .warning,
+                message: "Could not list pack directory contents: \(error.localizedDescription) — unreferenced file check skipped"
+            )]
+        }
 
         let subdirs = rootContents.filter { url in
             var isDir: ObjCBool = false
@@ -127,11 +135,20 @@ enum PackHeuristics {
         for dirURL in subdirs {
             let dirName = dirURL.lastPathComponent
 
-            guard let contents = try? fm.contentsOfDirectory(
-                at: dirURL,
-                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+            let contents: [URL]
+            do {
+                contents = try fm.contentsOfDirectory(
+                    at: dirURL,
+                    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                    options: [.skipsHiddenFiles]
+                )
+            } catch {
+                findings.append(Finding(
+                    severity: .warning,
+                    message: "Could not list contents of \(dirName)/: \(error.localizedDescription)"
+                ))
+                continue
+            }
 
             for itemURL in contents {
                 let relativePath = "\(dirName)/\(itemURL.lastPathComponent)"
@@ -179,11 +196,19 @@ enum PackHeuristics {
             referencedRootFiles.insert(script)
         }
 
-        guard let rootContents = try? fm.contentsOfDirectory(
-            at: packPath,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
+        let rootContents: [URL]
+        do {
+            rootContents = try fm.contentsOfDirectory(
+                at: packPath,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return [Finding(
+                severity: .warning,
+                message: "Could not list pack root contents: \(error.localizedDescription) — root-level file check skipped"
+            )]
+        }
 
         var findings: [Finding] = []
         for itemURL in rootContents {

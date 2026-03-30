@@ -70,9 +70,13 @@ struct ValidatePack: ParsableCommand {
         // Try as installed pack identifier (only if source doesn't look like a path)
         if !source.contains("/") {
             let registryData = try ctx.loadRegistry()
-            if let entry = ctx.registry.pack(identifier: source, in: registryData),
-               let packPath = entry.resolvedPath(packsDirectory: ctx.env.packsDirectory) {
-                return packPath
+            if let entry = ctx.registry.pack(identifier: source, in: registryData) {
+                if let packPath = entry.resolvedPath(packsDirectory: ctx.env.packsDirectory) {
+                    return packPath
+                }
+                ctx.output.error("Pack '\(source)' is registered but its local path is invalid")
+                ctx.output.info("Try removing and re-adding the pack: mcs pack remove \(source) && mcs pack add \(entry.sourceURL)")
+                throw ExitCode.failure
             }
         }
 

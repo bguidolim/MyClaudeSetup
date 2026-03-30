@@ -439,6 +439,63 @@ struct PackHeuristicsTests {
         #expect(!findings.contains(where: { $0.message.contains("nothing to install") }))
     }
 
+    @Test("No empty-pack warning when only templates exist")
+    func noEmptyWarningWithTemplates() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let contentFile = tmpDir.appendingPathComponent("content.md")
+        try "# Content".write(to: contentFile, atomically: true, encoding: .utf8)
+
+        let manifest = ExternalPackManifest(
+            schemaVersion: 1,
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            description: "A test pack",
+            author: nil,
+            minMCSVersion: nil,
+            components: nil,
+            templates: [ExternalTemplateDefinition(
+                sectionIdentifier: "test-pack.main",
+                placeholders: nil,
+                contentFile: "content.md",
+                dependencies: nil
+            )],
+            prompts: nil,
+            configureProject: nil,
+            supplementaryDoctorChecks: nil
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains(where: { $0.message.contains("nothing to install") }))
+    }
+
+    @Test("No empty-pack warning when only configureProject exists")
+    func noEmptyWarningWithConfigureProject() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let script = tmpDir.appendingPathComponent("configure.sh")
+        try "#!/bin/bash".write(to: script, atomically: true, encoding: .utf8)
+
+        let manifest = ExternalPackManifest(
+            schemaVersion: 1,
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            description: "A test pack",
+            author: nil,
+            minMCSVersion: nil,
+            components: nil,
+            templates: nil,
+            prompts: nil,
+            configureProject: ExternalConfigureProject(script: "configure.sh"),
+            supplementaryDoctorChecks: nil
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains(where: { $0.message.contains("nothing to install") }))
+    }
+
     // MARK: - Root-Level Content Files
 
     @Test("Detects unreferenced root-level content files")
@@ -456,6 +513,58 @@ struct PackHeuristicsTests {
         #expect(findings.contains(where: { $0.message.contains("config.yaml") && $0.severity == .warning }))
     }
 
+    @Test("configureProject script is not flagged as unreferenced at root")
+    func configureScriptNotFlaggedAtRoot() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try "#!/bin/bash".write(to: tmpDir.appendingPathComponent("configure.sh"), atomically: true, encoding: .utf8)
+
+        let manifest = ExternalPackManifest(
+            schemaVersion: 1,
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            description: "A test pack",
+            author: nil,
+            minMCSVersion: nil,
+            components: nil,
+            templates: nil,
+            prompts: nil,
+            configureProject: ExternalConfigureProject(script: "configure.sh"),
+            supplementaryDoctorChecks: nil
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains(where: { $0.message.contains("configure.sh") && $0.message.contains("not referenced") }))
+    }
+
+    @Test("configureProject script in subdirectory is not flagged as unreferenced")
+    func configureScriptInSubdirNotFlagged() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let scriptsDir = tmpDir.appendingPathComponent("scripts")
+        try FileManager.default.createDirectory(at: scriptsDir, withIntermediateDirectories: true)
+        try "#!/bin/bash".write(to: scriptsDir.appendingPathComponent("configure.sh"), atomically: true, encoding: .utf8)
+
+        let manifest = ExternalPackManifest(
+            schemaVersion: 1,
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            description: "A test pack",
+            author: nil,
+            minMCSVersion: nil,
+            components: nil,
+            templates: nil,
+            prompts: nil,
+            configureProject: ExternalConfigureProject(script: "scripts/configure.sh"),
+            supplementaryDoctorChecks: nil
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains(where: { $0.message.contains("scripts/configure.sh") && $0.message.contains("not referenced") }))
+    }
+
     @Test("Does not flag infrastructure files at root")
     func doesNotFlagInfrastructureFiles() throws {
         let tmpDir = try makeTmpDir(label: "heuristics")
@@ -471,5 +580,82 @@ struct PackHeuristicsTests {
         #expect(!findings.contains(where: { $0.message.contains("README.md") }))
         #expect(!findings.contains(where: { $0.message.contains("LICENSE") }))
         #expect(!findings.contains(where: { $0.message.contains("techpack.yaml") }))
+    }
+
+    // MARK: - Full Path Commands
+
+    @Test("Detects python MCP server with full path command")
+    func detectsFullPathPythonMCP() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let component = ExternalComponentDefinition(
+            id: "test-pack.server",
+            displayName: "Server",
+            description: "MCP server",
+            type: .mcpServer,
+            installAction: .mcpServer(ExternalMCPServerConfig(
+                name: "my-server",
+                command: "/usr/local/bin/python3",
+                args: nil,
+                env: nil,
+                transport: nil,
+                url: nil,
+                scope: nil
+            ))
+        )
+        let manifest = minimalManifest(components: [component])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(findings.contains(where: { $0.message.contains("MCP server 'my-server'") && $0.message.contains("python") }))
+    }
+
+    // MARK: - Edge Cases
+
+    @Test("python -m as last argument does not crash")
+    func pythonDashMAsLastArg() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let component = ExternalComponentDefinition(
+            id: "test-pack.server",
+            displayName: "Server",
+            description: "MCP server",
+            type: .mcpServer,
+            installAction: .mcpServer(ExternalMCPServerConfig(
+                name: "my-server",
+                command: "python3",
+                args: ["-m"],
+                env: nil,
+                transport: nil,
+                url: nil,
+                scope: nil
+            ))
+        )
+        let manifest = minimalManifest(components: [component])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains(where: { $0.message.contains("module") }))
+    }
+
+    // MARK: - Filesystem Error Handling
+
+    @Test("Emits warning when pack directory does not exist")
+    func warnsOnNonExistentPackDir() {
+        let nonExistent = URL(fileURLWithPath: "/tmp/mcs-test-nonexistent-\(UUID().uuidString)")
+
+        let component = ExternalComponentDefinition(
+            id: "test-pack.brew",
+            displayName: "Node",
+            description: "Node runtime",
+            type: .brewPackage,
+            installAction: .brewInstall(package: "node")
+        )
+        let manifest = minimalManifest(components: [component])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: nonExistent)
+
+        let dirWarnings = findings.filter { $0.message.contains("Could not list") }
+        #expect(!dirWarnings.isEmpty)
+        #expect(dirWarnings.allSatisfy { $0.severity == .warning })
     }
 }
