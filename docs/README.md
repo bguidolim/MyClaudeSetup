@@ -31,6 +31,7 @@ How mcs works under the hood:
 | Add a pack | [CLI > mcs pack add](cli.md#mcs-pack-add-source) |
 | Sync a project | [CLI > mcs sync](cli.md#mcs-sync) |
 | Create a pack | [Creating Tech Packs](creating-tech-packs.md) |
+| Validate a pack | [CLI > mcs pack validate](cli.md#mcs-pack-validate-source) |
 | Export your setup | [CLI > mcs export](cli.md#mcs-export) |
 | Diagnose issues | [CLI > mcs doctor](cli.md#mcs-doctor) |
 | Understand internals | [Architecture](architecture.md) |

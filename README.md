@@ -110,6 +110,8 @@ Use `mcs sync --global` for global-scope components (Homebrew packages, plugins,
 
 A tech pack is a Git repo with a `techpack.yaml` manifest. It can bundle MCP servers, plugins, hooks, skills, commands, agents, settings, templates, and doctor checks — anything `mcs` can install, verify, and uninstall.
 
+Use `mcs pack validate` to check your pack for structural errors and best practices before sharing.
+
 📖 **Full guide:** [Creating Tech Packs](docs/creating-tech-packs.md) · **Schema reference:** [techpack-schema.md](docs/techpack-schema.md)
 
 ---

@@ -471,6 +471,29 @@ The engine validates manifests on load. These rules are enforced:
 - Prompt `key` values must be unique
 - Doctor check required fields must be present and non-empty
 
+### Heuristic Checks
+
+`mcs pack validate` runs additional best-practice checks beyond structural validation. Findings are categorized by severity:
+
+**Errors** (block usage, exit code 1):
+
+| Check | Description |
+|-------|-------------|
+| Empty pack | Pack has no components, templates, or configure script |
+| Root source copy | `copyPackFile` source is `"."` or `"./"` — copies the entire pack root including `techpack.yaml`, LICENSE, and README |
+| Missing settings file | `settingsFile:` references a file that does not exist in the pack |
+
+**Warnings** (advisory, exit code 0):
+
+| Check | Description |
+|-------|-------------|
+| Unreferenced subdirectory files | Files in non-infrastructure subdirectories not referenced by any component, template, or configure script |
+| Unreferenced root-level files | Files at the pack root (excluding `techpack.yaml`, `README.md`, `LICENSE`, etc.) not referenced by any component |
+| MCP dependency gap | MCP server uses `python`/`node` command but no brew component installs that runtime |
+| Missing python module | MCP server uses `python -m <module>` but `<module>/` directory not found in the pack |
+
+Infrastructure directories (`.git`, `.github`, `.gitlab`, `.vscode`, `node_modules`, `__pycache__`, `.build`) and common root-level files (`techpack.yaml`, `README.md`, `LICENSE`, `Makefile`, etc.) are excluded from unreferenced-file checks.
+
 ---
 
 ## Complete Example

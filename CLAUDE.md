@@ -36,6 +36,7 @@ mcs pack remove <name>           # Remove an external tech pack
 mcs pack remove <name> --force   # Remove without confirmation
 mcs pack list                    # List registered external packs
 mcs pack update [name]           # Update pack(s) to latest version (skips local packs)
+mcs pack validate [source]       # Validate a tech pack (path, identifier, or current directory)
 mcs cleanup                      # Find and delete backup files
 mcs cleanup --force              # Delete backups without confirmation
 mcs export <dir>                 # Export current config as a tech pack
@@ -103,6 +104,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PromptExecutor.swift` — executes pack prompts (interactive value resolution during sync)
 - `ScriptRunner.swift` — sandboxed script execution for pack scripts
 - `ExternalDoctorCheck.swift` — factory for converting YAML doctor check definitions to `DoctorCheck` instances
+- `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths)
 
 ### Doctor (`Sources/mcs/Doctor/`)
 - `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution
@@ -115,7 +117,8 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `SyncCommand.swift` — primary command (`mcs sync`), handles both project-scoped and global-scoped sync with `--pack`, `--all`, `--dry-run`, `--customize`, `--global`, `--lock`, `--update` flags
 - `DoctorCommand.swift` — health checks with optional --fix and --pack filter
 - `CleanupCommand.swift` — backup file management with --force flag
-- `PackCommand.swift` — `mcs pack add/remove/list/update` subcommands; uses `PackSourceResolver` for 3-tier input detection (URL schemes → filesystem paths → GitHub shorthand)
+- `PackCommand.swift` — `mcs pack add/remove/list/update/validate` subcommands; uses `PackSourceResolver` for 3-tier input detection (URL schemes → filesystem paths → GitHub shorthand)
+- `ValidatePackCommand.swift` — `mcs pack validate` read-only subcommand; structural validation via `ExternalPackLoader.validate(at:)` + heuristic checks via `PackHeuristics`
 - `ExportCommand.swift` — export wizard: reads live configuration and generates a reusable tech pack directory; supports `--global`, `--identifier`, `--non-interactive`, `--dry-run`
 - `CheckUpdatesCommand.swift` — lightweight update checker for packs (`git ls-remote`) and CLI version (`git ls-remote --tags`); respects config keys and 24-hour cooldown
 - `ConfigCommand.swift` — `mcs config list/get/set` for managing user preferences; `set` immediately syncs the SessionStart hook in `~/.claude/settings.json`

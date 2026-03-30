@@ -78,6 +78,34 @@ mcs pack update [name]           # Update pack(s) to latest version
 
 Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically).
 
+### `mcs pack validate [source]`
+
+Validate a tech pack for structural correctness and best practices. Designed for pack authors to catch issues locally before submitting to the registry.
+
+```bash
+mcs pack validate                # Validate pack in current directory
+mcs pack validate /path/to/pack  # Validate pack at a specific path
+mcs pack validate ios            # Validate an installed pack by identifier
+```
+
+| Argument | Description |
+|----------|-------------|
+| `[source]` | Directory path or installed pack identifier. Defaults to current directory. |
+
+**Two-stage validation pipeline:**
+
+1. **Structural validation** — manifest existence, YAML parsing, schema validation, `minMCSVersion` check, referenced file existence
+2. **Heuristic checks** — best-practice analysis with severity levels
+
+**Severity levels:**
+
+| Severity | Exit code | Examples |
+|----------|-----------|---------|
+| Error | 1 | Empty pack (no components/templates/configure), `source: "."` copying entire pack root, missing settings file sources |
+| Warning | 0 | Unreferenced files in subdirectories, unreferenced root-level content files, MCP server using python/node without brew component, missing python module directory |
+
+Structural errors always cause exit code 1 and stop further analysis. Heuristic errors also cause exit code 1. Warnings are advisory and do not affect the exit code.
+
 ## `mcs doctor`
 
 Diagnose installation health with multi-layer checks.
