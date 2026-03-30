@@ -28,7 +28,7 @@ struct PackCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "pack",
         abstract: "Manage external tech packs",
-        subcommands: [AddPack.self, RemovePack.self, UpdatePack.self, ListPacks.self]
+        subcommands: [AddPack.self, RemovePack.self, UpdatePack.self, ListPacks.self, ValidatePack.self]
     )
 }
 
