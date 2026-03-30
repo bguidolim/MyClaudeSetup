@@ -638,6 +638,32 @@ struct PackHeuristicsTests {
         #expect(!findings.contains(where: { $0.message.contains("module") }))
     }
 
+    @Test("python -m check does not trigger for non-python MCP servers")
+    func pythonModuleCheckSkipsNonPython() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let component = ExternalComponentDefinition(
+            id: "test-pack.server",
+            displayName: "Server",
+            description: "MCP server",
+            type: .mcpServer,
+            installAction: .mcpServer(ExternalMCPServerConfig(
+                name: "my-node-server",
+                command: "node",
+                args: ["-m", "some_module"],
+                env: nil,
+                transport: nil,
+                url: nil,
+                scope: nil
+            ))
+        )
+        let manifest = minimalManifest(components: [component])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains(where: { $0.message.contains("module 'some_module'") }))
+    }
+
     // MARK: - Filesystem Error Handling
 
     @Test("Emits warning when pack directory does not exist")

@@ -30,10 +30,9 @@ enum PackHeuristics {
     // MARK: - Individual Checks
 
     private static func checkEmptyPack(manifest: ExternalPackManifest) -> [Finding] {
-        let hasComponents = !(manifest.components ?? []).isEmpty
-        let hasTemplates = !(manifest.templates ?? []).isEmpty
-        let hasConfigure = manifest.configureProject != nil
-        if !hasComponents, !hasTemplates, !hasConfigure {
+        if (manifest.components ?? []).isEmpty,
+           (manifest.templates ?? []).isEmpty,
+           manifest.configureProject == nil {
             return [Finding(severity: .error, message: "Pack has no components, templates, or configure script — nothing to install")]
         }
         return []
@@ -85,29 +84,33 @@ enum PackHeuristics {
         "node_modules", "__pycache__", ".build",
     ]
 
-    private static func checkUnreferencedFiles(
-        manifest: ExternalPackManifest,
-        packPath: URL
-    ) -> [Finding] {
-        let fm = FileManager.default
-
-        var referencedPaths = Set<String>()
+    private static func referencedPaths(from manifest: ExternalPackManifest) -> Set<String> {
+        var paths = Set<String>()
         for component in manifest.components ?? [] {
             switch component.installAction {
             case let .copyPackFile(config):
-                referencedPaths.insert(config.source)
+                paths.insert(config.source)
             case let .settingsFile(source):
-                referencedPaths.insert(source)
+                paths.insert(source)
             default:
                 break
             }
         }
         for template in manifest.templates ?? [] {
-            referencedPaths.insert(template.contentFile)
+            paths.insert(template.contentFile)
         }
         if let script = manifest.configureProject?.script {
-            referencedPaths.insert(script)
+            paths.insert(script)
         }
+        return paths
+    }
+
+    private static func checkUnreferencedFiles(
+        manifest: ExternalPackManifest,
+        packPath: URL
+    ) -> [Finding] {
+        let fm = FileManager.default
+        let referencedPaths = referencedPaths(from: manifest)
 
         let rootContents: [URL]
         do {
@@ -177,24 +180,7 @@ enum PackHeuristics {
         packPath: URL
     ) -> [Finding] {
         let fm = FileManager.default
-
-        var referencedRootFiles = Set<String>()
-        for component in manifest.components ?? [] {
-            switch component.installAction {
-            case let .copyPackFile(config) where !config.source.contains("/"):
-                referencedRootFiles.insert(config.source)
-            case let .settingsFile(source) where !source.contains("/"):
-                referencedRootFiles.insert(source)
-            default:
-                break
-            }
-        }
-        for template in manifest.templates ?? [] where !template.contentFile.contains("/") {
-            referencedRootFiles.insert(template.contentFile)
-        }
-        if let script = manifest.configureProject?.script, !script.contains("/") {
-            referencedRootFiles.insert(script)
-        }
+        let referencedRootFiles = referencedPaths(from: manifest).filter { !$0.contains("/") }
 
         let rootContents: [URL]
         do {
@@ -242,14 +228,14 @@ enum PackHeuristics {
             if case let .mcpServer(config) = component.installAction,
                let command = config.command {
                 let base = URL(fileURLWithPath: command).lastPathComponent
-                if base == "python" || base == "python3",
+                if ["python", "python3"].contains(base),
                    !brewPackages.contains(where: { $0 == "python" || $0.hasPrefix("python@") }) {
                     findings.append(Finding(
                         severity: .warning,
                         message: "MCP server '\(config.name)' uses python but no brew component installs python"
                     ))
                 }
-                if base == "node" || base == "npx",
+                if ["node", "npx"].contains(base),
                    !brewPackages.contains("node") {
                     findings.append(Finding(
                         severity: .warning,
@@ -271,8 +257,11 @@ enum PackHeuristics {
 
         for component in components {
             if case let .mcpServer(config) = component.installAction,
+               let command = config.command,
                let args = config.args {
-                guard let mIndex = args.firstIndex(of: "-m"),
+                let base = URL(fileURLWithPath: command).lastPathComponent
+                guard ["python", "python3"].contains(base),
+                      let mIndex = args.firstIndex(of: "-m"),
                       mIndex + 1 < args.count
                 else { continue }
 
