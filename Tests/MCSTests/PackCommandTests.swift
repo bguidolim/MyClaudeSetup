@@ -102,7 +102,8 @@ struct PackCommandParsingTests {
         #expect(subcommands.contains { $0 == RemovePack.self })
         #expect(subcommands.contains { $0 == UpdatePack.self })
         #expect(subcommands.contains { $0 == ListPacks.self })
-        #expect(subcommands.count == 4)
+        #expect(subcommands.contains { $0 == ValidatePack.self })
+        #expect(subcommands.count == 5)
     }
 }
 

@@ -71,9 +71,12 @@ components:
 
 That's it. One file, 10 lines.
 
-### 3. Install and test
+### 3. Validate and install
 
 ```bash
+# Validate before committing
+mcs pack validate .
+
 # Commit it
 git add -A && git commit -m "Initial tech pack"
 
@@ -557,11 +560,39 @@ This tracking lives in `<project>/.claude/.mcs-project`. You don't need to manag
 
 ---
 
+## Validating Your Pack
+
+Before submitting to the registry or sharing your pack, run the validation command:
+
+```bash
+# Validate from the pack directory
+cd /path/to/my-pack
+mcs pack validate
+
+# Or validate by path
+mcs pack validate /path/to/my-pack
+
+# Validate an already-installed pack
+mcs pack validate my-pack
+```
+
+The validator runs two stages:
+
+1. **Structural validation** — checks manifest YAML, schema, component references, and file existence
+2. **Heuristic checks** — catches common mistakes with severity levels:
+   - **Errors** (exit code 1): empty pack, `source: "."` copying the entire repo, missing settings file sources
+   - **Warnings** (exit code 0): unreferenced files in subdirectories, root-level content files not tied to any component, MCP servers using python/node without a matching brew component, `python -m <module>` without the module directory
+
+Fix all errors before publishing. Warnings are advisory but worth reviewing — they often indicate files you forgot to wire into `techpack.yaml`.
+
 ## Testing Your Pack
 
 ```bash
 # Add your pack (local path or GitHub URL)
 mcs pack add /path/to/my-pack
+
+# Validate before syncing
+mcs pack validate /path/to/my-pack
 
 # Sync a test project
 cd ~/Developer/test-project
@@ -605,6 +636,7 @@ mcs sync                  # Local packs pick up changes automatically
 ## Further Reading
 
 - [Schema Reference](techpack-schema.md) — complete field-by-field reference for `techpack.yaml`
+- [CLI Reference](cli.md#mcs-pack-validate-source) — full `mcs pack validate` options
 - [Troubleshooting](troubleshooting.md) — common issues and solutions
 
 ---
