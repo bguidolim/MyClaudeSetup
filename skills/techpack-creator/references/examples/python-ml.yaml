@@ -1,0 +1,116 @@
+# Example: Python ML/data science tech pack (based on real production patterns)
+# Schema: https://github.com/mcs-cli/mcs/blob/main/docs/techpack-schema.md
+# Guide: https://github.com/mcs-cli/mcs/blob/main/docs/creating-tech-packs.md
+
+schemaVersion: 1
+identifier: my-ml-project
+displayName: My ML Project
+description: Python ML/data science development with memory and documentation indexing
+author: "Developer Name"
+minMCSVersion: "2026.3.0"
+
+prompts:
+  - key: VENV_PATH
+    type: input
+    label: "Virtual environment path"
+    default: ".venv"
+
+components:
+  # ── Dependencies ──────────────────────────────────────────
+  - id: python
+    description: Python runtime
+    brew: python
+
+  - id: node
+    description: JavaScript runtime (required by MCP servers)
+    brew: node
+
+  - id: ollama
+    description: Local AI model runner
+    brew: ollama
+
+  # ── Services ──────────────────────────────────────────────
+  - id: ollama-service
+    description: Start Ollama background service
+    type: configuration
+    dependencies: [ollama]
+    shell: "brew services start ollama"
+    doctorChecks:
+      - type: commandExists
+        name: "Ollama service running"
+        section: AI Models
+        command: curl
+        args: ["-sf", "http://localhost:11434/api/tags"]
+        fixCommand: "brew services start ollama"
+
+  - id: ollama-embed-model
+    description: Pull embedding model for documentation indexing
+    type: configuration
+    dependencies: [ollama]
+    shell: "ollama pull nomic-embed-text"
+    doctorChecks:
+      - type: commandExists
+        name: "nomic-embed-text model"
+        section: AI Models
+        command: ollama
+        args: ["show", "nomic-embed-text"]
+
+  # ── MCP Servers ───────────────────────────────────────────
+  - id: docs-mcp-server
+    description: Documentation search with local embeddings
+    dependencies: [node, ollama]
+    mcp:
+      command: npx
+      args: ["-y", "@arabold/docs-mcp-server@latest", "--read-only"]
+      env:
+        OPENAI_API_KEY: "ollama"
+        OPENAI_API_BASE: "http://localhost:11434/v1"
+        DOCS_MCP_EMBEDDING_MODEL: "openai:nomic-embed-text"
+
+  # ── Hooks ─────────────────────────────────────────────────
+  - id: hook-session-start
+    description: Activate venv and check dependencies on session start
+    hookEvent: SessionStart
+    hookTimeout: 15
+    hookStatusMessage: "Checking Python environment..."
+    hook:
+      source: hooks/session_start.sh
+      destination: session_start.sh
+
+  - id: hook-sync-docs
+    description: Index documentation on session start (async)
+    dependencies: [ollama, docs-mcp-server]
+    hookEvent: SessionStart
+    hookAsync: true
+    hookTimeout: 120
+    hookStatusMessage: "Indexing documentation..."
+    hook:
+      source: hooks/sync_docs.sh
+      destination: sync_docs.sh
+
+  # ── Configuration ─────────────────────────────────────────
+  - id: settings
+    description: Claude Code settings
+    isRequired: true
+    settingsFile: config/settings.json
+
+  - id: gitignore
+    description: Global gitignore entries
+    isRequired: true
+    gitignore:
+      - .claude/memories
+      - .claude/settings.local.json
+      - .claude/.mcs-project
+
+templates:
+  - sectionIdentifier: instructions
+    contentFile: templates/instructions.md
+    placeholders:
+      - __VENV_PATH__
+
+supplementaryDoctorChecks:
+  - type: shellScript
+    name: pip available
+    section: Prerequisites
+    command: "python3 -m pip --version >/dev/null 2>&1"
+    fixCommand: "python3 -m ensurepip --upgrade"

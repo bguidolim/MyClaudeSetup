@@ -1,0 +1,83 @@
+# Example: iOS/macOS Swift tech pack (based on real production pack)
+# Schema: https://github.com/mcs-cli/mcs/blob/main/docs/techpack-schema.md
+# Guide: https://github.com/mcs-cli/mcs/blob/main/docs/creating-tech-packs.md
+
+schemaVersion: 1
+identifier: my-ios-app
+displayName: My iOS App
+description: Xcode integration, simulator management, and code quality for Claude Code
+author: "Developer Name"
+minMCSVersion: "2026.3.6"
+
+prompts:
+  - key: PROJECT
+    type: fileDetect
+    label: "Xcode project / workspace"
+    detectPattern:
+      - "*.xcworkspace"
+      - "*.xcodeproj"
+
+components:
+  # ── Dependencies ──────────────────────────────────────────
+  - id: node
+    description: JavaScript runtime (required by MCP servers)
+    brew: node
+
+  - id: jq
+    description: JSON processor (required by hooks)
+    brew: jq
+
+  # ── MCP Servers ───────────────────────────────────────────
+  - id: xcodebuildmcp
+    displayName: XcodeBuildMCP
+    description: Xcode build and test integration
+    dependencies: [node]
+    mcp:
+      name: XcodeBuildMCP
+      command: npx
+      args: ["-y", "xcodebuildmcp@latest"]
+
+  # ── Skills (external) ────────────────────────────────────
+  - id: skill-xcodebuildmcp
+    description: XcodeBuildMCP skill for Xcode workflows
+    type: skill
+    dependencies: [xcodebuildmcp]
+    shell: "npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y"
+
+  # ── Hooks ─────────────────────────────────────────────────
+  - id: hook-simulator-status
+    description: Report booted iOS simulator on session start
+    dependencies: [jq]
+    hookEvent: SessionStart
+    hook:
+      source: hooks/simulator_status.sh
+      destination: simulator_status.sh
+
+  # ── Configuration ─────────────────────────────────────────
+  - id: gitignore
+    description: Xcode-specific gitignore entries
+    isRequired: true
+    gitignore:
+      - .xcodebuildmcp
+
+templates:
+  - sectionIdentifier: ios
+    contentFile: templates/ios.md
+
+  - sectionIdentifier: xcodebuildmcp
+    contentFile: templates/xcodebuildmcp.md
+    placeholders:
+      - __PROJECT__
+    dependencies:
+      - xcodebuildmcp
+
+configureProject:
+  script: scripts/configure-xcode.sh
+
+supplementaryDoctorChecks:
+  - type: commandExists
+    name: Xcode Command Line Tools
+    section: Prerequisites
+    command: xcode-select
+    args: ["-p"]
+    fixCommand: "xcode-select --install"

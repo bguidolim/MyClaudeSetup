@@ -1,0 +1,106 @@
+# Example: Node.js web development tech pack (based on real production patterns)
+# Schema: https://github.com/mcs-cli/mcs/blob/main/docs/techpack-schema.md
+# Guide: https://github.com/mcs-cli/mcs/blob/main/docs/creating-tech-packs.md
+
+schemaVersion: 1
+identifier: my-web-app
+displayName: My Web App
+description: Node.js web development with git workflows and code review
+author: "Developer Name"
+minMCSVersion: "2026.3.0"
+
+prompts:
+  - key: BRANCH_PREFIX
+    type: input
+    label: "Branch prefix (e.g. feature) -> feature/add-login-screen"
+    default: "feature"
+
+  - key: PACKAGE_MANAGER
+    type: select
+    label: "Package manager"
+    options:
+      - value: npm
+        label: npm
+      - value: yarn
+        label: Yarn
+      - value: pnpm
+        label: pnpm
+
+components:
+  # ── Dependencies ──────────────────────────────────────────
+  - id: node
+    description: JavaScript runtime
+    brew: node
+
+  - id: gh
+    description: GitHub CLI
+    brew: gh
+
+  - id: jq
+    description: JSON processor (required by hooks)
+    brew: jq
+
+  # ── Plugins ───────────────────────────────────────────────
+  - id: plugin-pr-review
+    description: PR review toolkit
+    plugin: "pr-review-toolkit@claude-plugins-official"
+
+  # ── Hooks ─────────────────────────────────────────────────
+  - id: hook-session-start
+    description: Git status and dependency check on session start
+    dependencies: [jq]
+    hookEvent: SessionStart
+    hook:
+      source: hooks/session_start.sh
+      destination: session_start.sh
+
+  # ── Commands ──────────────────────────────────────────────
+  - id: command-commit
+    description: /commit command for structured commits
+    command:
+      source: commands/commit.md
+      destination: commit.md
+
+  - id: command-pr
+    description: /pr command for creating pull requests
+    dependencies: [gh]
+    command:
+      source: commands/pr.md
+      destination: pr.md
+
+  - id: command-review-pr
+    description: /review-pr command for multi-agent PR review
+    dependencies: [gh, plugin-pr-review]
+    command:
+      source: commands/review-pr.md
+      destination: review-pr.md
+
+  # ── Configuration ─────────────────────────────────────────
+  - id: settings
+    description: Claude Code settings (plan mode, thinking)
+    isRequired: true
+    settingsFile: config/settings.json
+
+  - id: gitignore
+    description: Global gitignore entries
+    isRequired: true
+    gitignore:
+      - "*.local.*"
+
+templates:
+  - sectionIdentifier: git
+    contentFile: templates/git.md
+    placeholders:
+      - __BRANCH_PREFIX__
+
+supplementaryDoctorChecks:
+  - type: hookEventExists
+    name: SessionStart hook registered
+    section: Hooks
+    event: SessionStart
+
+  - type: settingsKeyEquals
+    name: Plan mode enabled
+    section: Settings
+    keyPath: permissions.defaultMode
+    expectedValue: plan
