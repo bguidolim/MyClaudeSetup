@@ -20,6 +20,7 @@ struct ListConfig: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
+        MCSAnalytics.initialize(env: env, output: output)
         let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         output.header("Configuration")
@@ -34,6 +35,8 @@ struct ListConfig: ParsableCommand {
 
         output.plain("")
         output.dimmed("Config file: \(env.mcsConfigFile.path)")
+
+        MCSAnalytics.trackCommand(.configList)
     }
 }
 
@@ -51,6 +54,7 @@ struct GetConfig: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
+        MCSAnalytics.initialize(env: env, output: output)
         let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         guard MCSConfig.knownKeys.contains(where: { $0.key == key }) else {
@@ -64,6 +68,8 @@ struct GetConfig: ParsableCommand {
         } else {
             output.dimmed("(not set)")
         }
+
+        MCSAnalytics.trackCommand(.configGet)
     }
 }
 
@@ -84,6 +90,7 @@ struct SetConfig: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
+        MCSAnalytics.initialize(env: env, output: output)
         var config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         guard MCSConfig.knownKeys.contains(where: { $0.key == key }) else {
@@ -100,5 +107,7 @@ struct SetConfig: ParsableCommand {
 
         // Immediately manage the SessionStart hook in ~/.claude/settings.json
         UpdateChecker.syncHook(config: config, env: env, output: output)
+
+        MCSAnalytics.trackCommand(.configSet)
     }
 }

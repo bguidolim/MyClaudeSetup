@@ -38,6 +38,7 @@ struct SyncCommand: LockedCommand {
     func perform() throws {
         let env = Environment()
         let output = CLIOutput()
+        MCSAnalytics.initialize(env: env, output: output)
         let shell = ShellRunner(environment: env)
 
         guard ensureClaudeCLI(shell: shell, environment: env, output: output) else {
@@ -71,6 +72,8 @@ struct SyncCommand: LockedCommand {
             // Check for updates after sync (respects 24-hour cache)
             UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
         }
+
+        MCSAnalytics.trackCommand(.sync)
     }
 
     // MARK: - Global Scope

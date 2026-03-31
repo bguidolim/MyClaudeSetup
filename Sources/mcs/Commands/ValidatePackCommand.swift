@@ -48,6 +48,8 @@ struct ValidatePack: ParsableCommand {
             ctx.output.doctorSummary(passed: passed, fixed: 0, warnings: warnings.count, issues: errors.count)
         }
 
+        MCSAnalytics.trackCommand(.packValidate)
+
         if !errors.isEmpty {
             throw ExitCode.failure
         }

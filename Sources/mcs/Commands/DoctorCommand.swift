@@ -26,6 +26,7 @@ struct DoctorCommand: LockedCommand {
     func perform() throws {
         let env = Environment()
         let output = CLIOutput()
+        MCSAnalytics.initialize(env: env, output: output)
         let shell = ShellRunner(environment: env)
         let registry = TechPackRegistry.loadWithExternalPacks(
             environment: env,
@@ -43,5 +44,7 @@ struct DoctorCommand: LockedCommand {
 
         // Check for updates (respects 24-hour cache)
         UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
+
+        MCSAnalytics.trackCommand(.doctor)
     }
 }

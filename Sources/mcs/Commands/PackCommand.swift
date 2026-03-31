@@ -12,6 +12,7 @@ struct PackCommandContext {
         output = CLIOutput()
         shell = ShellRunner(environment: env)
         registry = PackRegistryFile(path: env.packsRegistry)
+        MCSAnalytics.initialize(env: env, output: output)
     }
 
     func loadRegistry() throws -> PackRegistryFile.RegistryData {
@@ -222,6 +223,8 @@ struct AddPack: LockedCommand {
         ctx.output.success("Pack '\(manifest.displayName)' added successfully.")
         ctx.output.plain("")
         ctx.output.info("Next step: run 'mcs sync' to apply the pack to your project.")
+
+        MCSAnalytics.trackCommand(.packAdd)
     }
 
     // MARK: - Local Add
@@ -312,6 +315,8 @@ struct AddPack: LockedCommand {
         ctx.output.success("Pack '\(manifest.displayName)' added as local pack.")
         ctx.output.plain("")
         ctx.output.info("Next step: run 'mcs sync' to apply the pack to your project.")
+
+        MCSAnalytics.trackCommand(.packAdd)
     }
 
     // MARK: - Shared Helpers
@@ -433,7 +438,6 @@ struct RemovePack: LockedCommand {
 
     func perform() throws {
         let ctx = PackCommandContext()
-
         let fetcher = PackFetcher(
             shell: ctx.shell,
             output: ctx.output,
@@ -605,6 +609,7 @@ struct RemovePack: LockedCommand {
         }
 
         ctx.output.success("Pack '\(entry.displayName)' removed.")
+        MCSAnalytics.trackCommand(.packRemove)
     }
 }
 
@@ -695,6 +700,8 @@ struct UpdatePack: LockedCommand {
             ctx.output.plain("")
             ctx.output.info("Run 'mcs sync' to apply updated pack components.")
         }
+
+        MCSAnalytics.trackCommand(.packUpdate)
     }
 }
 
@@ -733,6 +740,8 @@ struct ListPacks: ParsableCommand {
         }
 
         ctx.output.plain("")
+
+        MCSAnalytics.trackCommand(.packList)
     }
 
     func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {

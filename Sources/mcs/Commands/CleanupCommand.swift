@@ -13,6 +13,7 @@ struct CleanupCommand: LockedCommand {
     func perform() throws {
         let env = Environment()
         let output = CLIOutput()
+        MCSAnalytics.initialize(env: env, output: output)
 
         output.header("Backup Cleanup")
 
@@ -67,5 +68,7 @@ struct CleanupCommand: LockedCommand {
         } else {
             output.info("No backups deleted.")
         }
+
+        MCSAnalytics.trackCommand(.cleanup)
     }
 }
