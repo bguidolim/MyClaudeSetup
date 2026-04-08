@@ -107,8 +107,7 @@ jobs:
               echo "Found: $LAST_TITLE (milestone #$LAST_MS_NUMBER, $OPEN_COUNT open issues)"
 
               if [ "$OPEN_COUNT" -gt 0 ]; then
-                gh issue list --repo "$REPO" --milestone "$LAST_TITLE" --state open --json number,title --jq '.[]' \
-                  | jq -c '.' | while read -r ISSUE; do
+                while read -r ISSUE; do
                     ISSUE_NUM=$(echo "$ISSUE" | jq -r '.number')
                     ISSUE_TITLE=$(echo "$ISSUE" | jq -r '.title')
 
@@ -118,7 +117,7 @@ jobs:
                       --silent
 
                     echo "  #$ISSUE_NUM → $THIS_TITLE  - $ISSUE_TITLE"
-                  done
+                  done < <(gh issue list --repo "$REPO" --milestone "$LAST_TITLE" --state open --json number,title --jq '.[]' | jq -c '.')
 
                 echo "Moved $OPEN_COUNT issues from $LAST_TITLE → $THIS_TITLE"
 

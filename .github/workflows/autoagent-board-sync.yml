@@ -75,17 +75,23 @@ jobs:
 
           READY_FOR_QA_ID=$(echo "$ITEM_DATA" | jq -r '.data.organization.projectV2.field.options[] | select(.name == "Ready For QA") | .id')
           DONE_ID=$(echo "$ITEM_DATA" | jq -r '.data.organization.projectV2.field.options[] | select(.name == "Done") | .id')
+          TODO_ID=$(echo "$ITEM_DATA" | jq -r '.data.organization.projectV2.field.options[] | select(.name == "Todo") | .id')
 
-          if [ -z "$ITEM_ID" ]; then
-            echo "::error::Issue #$ISSUE_NUM not found on project board (check pagination or board membership)"
-            exit 1
-          fi
+          # Validate all critical IDs
+          for VAR_NAME in PROJECT_ID FIELD_ID ITEM_ID READY_FOR_QA_ID DONE_ID TODO_ID; do
+            VAL=$(eval echo \$$VAR_NAME)
+            if [ -z "$VAL" ] || [ "$VAL" = "null" ]; then
+              echo "::error::$VAR_NAME is empty — check project board configuration"
+              exit 1
+            fi
+          done
 
           echo "projectId=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "fieldId=$FIELD_ID" >> $GITHUB_OUTPUT
           echo "itemId=$ITEM_ID" >> $GITHUB_OUTPUT
           echo "readyForQaId=$READY_FOR_QA_ID" >> $GITHUB_OUTPUT
           echo "doneId=$DONE_ID" >> $GITHUB_OUTPUT
+          echo "todoId=$TODO_ID" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
 
@@ -165,27 +171,13 @@ jobs:
           ISSUE_NUM="${{ steps.issue.outputs.number }}"
           echo "PR closed without merge for #${ISSUE_NUM}  - moving back to TODO"
 
-          TODO_ID=$(gh api graphql -f query="
-            query {
-              node(id: \"${{ steps.project.outputs.projectId }}\") {
-                ... on ProjectV2 {
-                  field(name: \"Status\") {
-                    ... on ProjectV2SingleSelectField {
-                      options { id name }
-                    }
-                  }
-                }
-              }
-            }
-          " --jq '.data.node.field.options[] | select(.name == "Todo") | .id')
-
           gh api graphql -f query="
             mutation {
               updateProjectV2ItemFieldValue(input: {
                 projectId: \"${{ steps.project.outputs.projectId }}\"
                 itemId: \"${{ steps.project.outputs.itemId }}\"
                 fieldId: \"${{ steps.project.outputs.fieldId }}\"
-                value: { singleSelectOptionId: \"${TODO_ID}\" }
+                value: { singleSelectOptionId: \"${{ steps.project.outputs.todoId }}\" }
               }) {
                 projectV2Item { id }
               }

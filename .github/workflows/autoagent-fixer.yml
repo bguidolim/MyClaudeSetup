@@ -213,10 +213,13 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Gather failure context
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          PR_NUM: ${{ needs.prepare.outputs.number }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          REPO: ${{ github.repository }}
         run: |
-          PR_NUM="${{ needs.prepare.outputs.number }}"
-          BRANCH="${{ needs.prepare.outputs.branch }}"
-
           echo "# Failure Context for PR #${PR_NUM}" > /tmp/failure-context.md
 
           # CI check results
@@ -235,11 +238,11 @@ jobs:
           # Code review comments
           echo "" >> /tmp/failure-context.md
           echo "## Code Review Comments" >> /tmp/failure-context.md
-          gh api "/repos/${{ github.repository }}/pulls/$PR_NUM/comments" \
+          gh api "/repos/${REPO}/pulls/$PR_NUM/comments" \
             --jq '.[] | "### \(.path):\(.line // .original_line)\n\(.body)\n"' >> /tmp/failure-context.md || echo "No review comments" >> /tmp/failure-context.md
 
           # PR review verdicts
-          gh api "/repos/${{ github.repository }}/pulls/$PR_NUM/reviews" \
+          gh api "/repos/${REPO}/pulls/$PR_NUM/reviews" \
             --jq '.[] | select(.state == "CHANGES_REQUESTED") | "### Review by \(.user.login):\n\(.body)\n"' >> /tmp/failure-context.md || true
 
           # Merge conflict check
@@ -247,42 +250,48 @@ jobs:
           if [ "$MERGEABLE" = "CONFLICTING" ]; then
             echo "" >> /tmp/failure-context.md
             echo "## MERGE CONFLICT" >> /tmp/failure-context.md
-            echo "PR has conflicts with base branch (${{ needs.prepare.outputs.base }}). Rebase required." >> /tmp/failure-context.md
+            echo "PR has conflicts with base branch (${BASE}). Rebase required." >> /tmp/failure-context.md
           fi
 
-          sed 's/::\(error\|warning\)::/[\1]/g' /tmp/failure-context.md
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          # Sanitize workflow command markers in-place
+          sed -i 's/::\(error\|warning\)::/[\1]/g' /tmp/failure-context.md
 
       - name: Run Claude Fixer
         id: claude-run
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_NUM: ${{ needs.prepare.outputs.number }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          MODEL: ${{ needs.prepare.outputs.model }}
         run: |
           echo "pre_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-          PR_NUM="${{ needs.prepare.outputs.number }}"
-          BRANCH="${{ needs.prepare.outputs.branch }}"
-          BASE="${{ needs.prepare.outputs.base }}"
           CONTEXT=$(cat /tmp/failure-context.md)
 
           export PR_NUM BRANCH BASE CONTEXT
           git show origin/main:.github/prompts/fixer.md | envsubst '$PR_NUM $BRANCH $BASE $CONTEXT' | \
-            claude -p --verbose --output-format stream-json --model "${{ needs.prepare.outputs.model }}" --max-turns 500 \
+            claude -p --verbose --output-format stream-json --model "$MODEL" --max-turns 500 \
               --permission-mode auto
 
       - name: Re-trigger CI if no changes were made
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          PR_NUM: ${{ needs.prepare.outputs.number }}
+          PRE_SHA: ${{ steps.claude-run.outputs.pre_sha }}
         run: |
-          BRANCH="${{ needs.prepare.outputs.branch }}"
-          BASE="${{ needs.prepare.outputs.base }}"
-          PR_NUM="${{ needs.prepare.outputs.number }}"
-
-          # Check if Claude made any new commits
-          # Compare HEAD against pre-Claude SHA (can't use remote — Claude pushes its own commits)
-          PRE_SHA="${{ steps.claude-run.outputs.pre_sha }}"
           POST_SHA=$(git rev-parse HEAD)
 
           if [ "$PRE_SHA" = "$POST_SHA" ]; then
+            # Guard against infinite re-trigger loops (check_suite → fixer → empty commit → check_suite)
+            LAST_MSG=$(git log -1 --pretty=%s)
+            if [[ "$LAST_MSG" == "chore: re-trigger CI for PR #"* ]]; then
+              echo "Already re-triggered CI on previous run. Stopping to prevent loop."
+              exit 0
+            fi
+
             echo "No new commits from fixer. Merging ${BASE} to re-trigger CI."
             git fetch origin ${BASE}
             if git merge origin/${BASE} --no-edit 2>/dev/null; then
@@ -302,19 +311,21 @@ jobs:
           else
             echo "Fixer made changes. CI will be triggered by the push."
           fi
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
 
       - name: Capture fix summary
         id: summary
         if: always()
+        env:
+          PR_NUM: ${{ needs.prepare.outputs.number }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          MODEL: ${{ needs.prepare.outputs.model }}
         run: |
-          PR_NUM="${{ needs.prepare.outputs.number }}"
+          STATUS="${{ job.status }}"
 
           # Human-readable summary from commit messages
-          COMMITS=$(git log --pretty="- %s" origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | head -20 || echo "- No commits found")
-          FILES_CHANGED=$(git diff --name-only origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | wc -l | tr -d ' ')
-          BRANCH="${{ needs.prepare.outputs.branch }}"
+          COMMITS=$(git log --pretty="- %s" origin/${BASE}..HEAD 2>/dev/null | head -20 || echo "- No commits found")
+          FILES_CHANGED=$(git diff --name-only origin/${BASE}..HEAD 2>/dev/null | wc -l | tr -d ' ')
 
           # Job summary
           {
@@ -323,10 +334,10 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **PR** | #${PR_NUM} |"
-            echo "| **Status** | ${{ job.status }} |"
-            echo "| **Model** | ${{ needs.prepare.outputs.model }} |"
+            echo "| **Status** | ${STATUS} |"
+            echo "| **Model** | ${MODEL} |"
             echo "| **Branch** | \`${BRANCH}\` |"
-            echo "| **Base** | \`${{ needs.prepare.outputs.base }}\` |"
+            echo "| **Base** | \`${BASE}\` |"
             echo "| **Files changed** | ${FILES_CHANGED} |"
             echo ""
             echo "### Commits"
@@ -344,29 +355,37 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Re-request reviewers
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          PR_NUM: ${{ needs.prepare.outputs.number }}
+          REPO: ${{ github.repository }}
         run: |
-          PR_NUM="${{ needs.prepare.outputs.number }}"
-          REVIEWERS=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/reviews" \
+          REVIEWERS=$(gh api "/repos/${REPO}/pulls/${PR_NUM}/reviews" \
             --jq '[.[].user.login] | unique' 2>/dev/null || echo "[]")
           if [ "$REVIEWERS" != "[]" ]; then
             echo "$REVIEWERS" | jq -r '.[]' | while read -r USER; do
-              gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/requested_reviewers" \
-                -X POST -f "reviewers[]=$USER" --silent || true
-              echo "Re-requested review from: $USER"
+              if gh api "/repos/${REPO}/pulls/${PR_NUM}/requested_reviewers" \
+                  -X POST -f "reviewers[]=$USER" --silent 2>/dev/null; then
+                echo "Re-requested review from: $USER"
+              else
+                echo "::warning::Failed to re-request review from: $USER"
+              fi
             done
           fi
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
 
       - name: Log run
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          PR_NUM: ${{ needs.prepare.outputs.number }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          MODEL: ${{ needs.prepare.outputs.model }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          PR_NUM="${{ needs.prepare.outputs.number }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           STATUS="${{ job.status }}"
 
-          COMMITS=$(git log --pretty="- %s" origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | head -20 || echo "- No new commits")
-          FILES_CHANGED=$(git diff --name-only origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | wc -l | tr -d ' ')
+          COMMITS=$(git log --pretty="- %s" origin/${BASE}..HEAD 2>/dev/null | head -20 || echo "- No new commits")
+          FILES_CHANGED=$(git diff --name-only origin/${BASE}..HEAD 2>/dev/null | wc -l | tr -d ' ')
 
           if [ "$STATUS" = "success" ]; then
             ICON="🔧"
@@ -377,15 +396,13 @@ jobs:
           BODY="${ICON} **Fixer run** - [workflow run](${RUN_URL})
 
           **Status:** ${STATUS}
-          **Model:** ${{ needs.prepare.outputs.model }}
+          **Model:** ${MODEL}
           **Files changed:** ${FILES_CHANGED}
 
           **Commits:**
           ${COMMITS}"
 
           gh pr comment "$PR_NUM" --body "$BODY"
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
 
   notify-done:
     needs: fix

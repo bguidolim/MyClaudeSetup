@@ -195,20 +195,13 @@ jobs:
             fi
           fi
 
-          # Move to IN PROGRESS on the board
-          PROJECT_ID=$(gh api graphql -f query='
+          # Move to IN PROGRESS on the board (single query for project + field + options)
+          BOARD_DATA=$(gh api graphql -f query='
             query {
               organization(login: "'"$PROJECT_ORG"'") {
-                projectV2(number: '"$PROJECT_NUMBER"') { id }
-              }
-            }
-          ' --jq '.data.organization.projectV2.id')
-
-          STATUS_FIELD_ID=$(gh api graphql -f query="
-            query {
-              node(id: \"${PROJECT_ID}\") {
-                ... on ProjectV2 {
-                  field(name: \"Status\") {
+                projectV2(number: '"$PROJECT_NUMBER"') {
+                  id
+                  field(name: "Status") {
                     ... on ProjectV2SingleSelectField {
                       id
                       options { id name }
@@ -217,21 +210,24 @@ jobs:
                 }
               }
             }
-          " --jq '.data.node.field.id')
+          ')
 
-          IN_PROGRESS_ID=$(gh api graphql -f query="
-            query {
-              node(id: \"${PROJECT_ID}\") {
-                ... on ProjectV2 {
-                  field(name: \"Status\") {
-                    ... on ProjectV2SingleSelectField {
-                      options { id name }
-                    }
-                  }
-                }
-              }
-            }
-          " --jq '.data.node.field.options[] | select(.name == "In Progress") | .id')
+          PROJECT_ID=$(echo "$BOARD_DATA" | jq -r '.data.organization.projectV2.id')
+          STATUS_FIELD_ID=$(echo "$BOARD_DATA" | jq -r '.data.organization.projectV2.field.id')
+          IN_PROGRESS_ID=$(echo "$BOARD_DATA" | jq -r '.data.organization.projectV2.field.options[] | select(.name == "In Progress") | .id')
+
+          if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
+            echo "::error::Could not resolve project ID for $PROJECT_ORG project #$PROJECT_NUMBER"
+            exit 1
+          fi
+          if [ -z "$STATUS_FIELD_ID" ] || [ "$STATUS_FIELD_ID" = "null" ]; then
+            echo "::error::Could not resolve Status field ID on project board"
+            exit 1
+          fi
+          if [ -z "$IN_PROGRESS_ID" ] || [ "$IN_PROGRESS_ID" = "null" ]; then
+            echo "::error::Could not resolve 'In Progress' option ID (check field option names)"
+            exit 1
+          fi
 
           gh api graphql -f query="
             mutation {
@@ -257,11 +253,14 @@ jobs:
       - name: Build start message
         id: msg
         if: steps.resolve.outputs.skip != 'true'
+        env:
+          ISSUE_NUM: ${{ steps.resolve.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.resolve.outputs.issue_title }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           {
             echo 'start_message<<EOF'
-            echo "🏗️ [AUTOAGENT] Implementer  - #${{ steps.resolve.outputs.issue_number }} ${{ steps.resolve.outputs.issue_title }}"
+            echo "🏗️ [AUTOAGENT] Implementer  - #${ISSUE_NUM} ${ISSUE_TITLE}"
             echo "${RUN_URL}"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
@@ -301,57 +300,66 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Fetch issue details
-        run: |
-          gh issue view "${{ needs.prepare.outputs.issue_number }}" --json title,body,labels > /tmp/issue.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          gh issue view "$ISSUE_NUM" --json title,body,labels > /tmp/issue.json
 
       - name: Implement with Claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+          BASE: ${{ needs.prepare.outputs.base_branch }}
+          MODEL: ${{ needs.prepare.outputs.model }}
         run: |
-          ISSUE_NUM="${{ needs.prepare.outputs.issue_number }}"
-          BASE="${{ needs.prepare.outputs.base_branch }}"
           ISSUE_BODY=$(jq -r '.body' /tmp/issue.json)
           ISSUE_TITLE=$(jq -r '.title' /tmp/issue.json)
 
           export ISSUE_NUM ISSUE_TITLE ISSUE_BODY BASE
           git show origin/main:.github/prompts/implementer.md | envsubst '$ISSUE_NUM $ISSUE_TITLE $ISSUE_BODY $BASE' | \
-            claude -p --verbose --output-format stream-json --model "${{ needs.prepare.outputs.model }}" --max-turns 500 \
+            claude -p --verbose --output-format stream-json --model "$MODEL" --max-turns 500 \
               --permission-mode auto
 
       - name: Comment on success
         if: success()
-        run: |
-          PR_URL=$(gh pr list --search "head:autoagent/${{ needs.prepare.outputs.issue_number }}" --state open --json url -q '.[0].url' 2>/dev/null || echo "")
-          if [ -n "$PR_URL" ]; then
-            gh issue comment "${{ needs.prepare.outputs.issue_number }}" \
-              --body "Implementation complete. PR: ${PR_URL}"
-          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          PR_URL=$(gh pr list --search "head:autoagent/${ISSUE_NUM}" --state open --json url -q '.[0].url' 2>/dev/null || echo "")
+          if [ -n "$PR_URL" ]; then
+            gh issue comment "$ISSUE_NUM" --body "Implementation complete. PR: ${PR_URL}"
+          fi
 
       - name: Comment on failure
         if: failure()
-        run: |
-          gh issue comment "${{ needs.prepare.outputs.issue_number }}" \
-            --body "Autoagent failed. [Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE_NUM" \
+            --body "Autoagent failed. [Workflow run](${RUN_URL})"
 
       - name: Capture summary
         id: summary
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          BASE_BRANCH: ${{ needs.prepare.outputs.base_branch }}
+          MODEL: ${{ needs.prepare.outputs.model }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          ISSUE_NUM="${{ needs.prepare.outputs.issue_number }}"
-          ISSUE_TITLE="${{ needs.prepare.outputs.issue_title }}"
           STATUS="${{ job.status }}"
 
           PR_URL=$(gh pr list --search "head:autoagent/${ISSUE_NUM}" --state open --json url -q '.[0].url' 2>/dev/null || echo "")
 
           BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-          COMMITS=$(git log --pretty="- %s" origin/${{ needs.prepare.outputs.base_branch }}..HEAD 2>/dev/null | head -20 || echo "- No commits")
-          FILES_CHANGED=$(git diff --name-only origin/${{ needs.prepare.outputs.base_branch }}..HEAD 2>/dev/null | wc -l | tr -d ' ')
+          COMMITS=$(git log --pretty="- %s" origin/${BASE_BRANCH}..HEAD 2>/dev/null | head -20 || echo "- No commits")
+          FILES_CHANGED=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null | wc -l | tr -d ' ')
 
           # Job summary
           {
@@ -361,9 +369,9 @@ jobs:
             echo "|---|---|"
             echo "| **Issue** | #${ISSUE_NUM} - ${ISSUE_TITLE} |"
             echo "| **Status** | ${STATUS} |"
-            echo "| **Model** | ${{ needs.prepare.outputs.model }} |"
+            echo "| **Model** | ${MODEL} |"
             echo "| **Branch** | \`${BRANCH}\` |"
-            echo "| **Base** | \`${{ needs.prepare.outputs.base_branch }}\` |"
+            echo "| **Base** | \`${BASE_BRANCH}\` |"
             echo "| **Files changed** | ${FILES_CHANGED} |"
             if [ -n "$PR_URL" ]; then
               echo "| **PR** | ${PR_URL} |"
@@ -374,30 +382,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Telegram message
-          if [ "$STATUS" = "success" ] && [ -n "$PR_URL" ]; then
-            {
-              echo 'after_message<<EOF'
-              echo "[AUTOAGENT] Implementer done - #${ISSUE_NUM} ${ISSUE_TITLE}"
-              echo "PR: ${PR_URL}"
-              echo 'EOF'
-            } >> "$GITHUB_OUTPUT"
-          elif [ "$STATUS" = "success" ]; then
-            {
-              echo 'after_message<<EOF'
-              echo "[AUTOAGENT] Implementer done - #${ISSUE_NUM} ${ISSUE_TITLE}"
-              echo 'EOF'
-            } >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" = "success" ]; then
+            MSG="[AUTOAGENT] Implementer done - #${ISSUE_NUM} ${ISSUE_TITLE}"
+            [ -n "$PR_URL" ] && MSG="${MSG}
+          PR: ${PR_URL}"
           else
-            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            {
-              echo 'after_message<<EOF'
-              echo "[AUTOAGENT] Implementer failed - #${ISSUE_NUM} ${ISSUE_TITLE}"
-              echo "${RUN_URL}"
-              echo 'EOF'
-            } >> "$GITHUB_OUTPUT"
+            MSG="[AUTOAGENT] Implementer failed - #${ISSUE_NUM} ${ISSUE_TITLE}
+          ${RUN_URL}"
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          {
+            echo 'after_message<<EOF'
+            echo "$MSG"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
   notify-done:
     needs: implement

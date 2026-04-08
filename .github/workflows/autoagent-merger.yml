@@ -156,16 +156,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_LIST_B64: ${{ needs.prepare.outputs.pr_list }}
+          REPO: ${{ github.repository }}
         run: |
           set -e
 
-          echo "${{ needs.prepare.outputs.pr_list }}" | base64 -d > /tmp/merger-prs.txt
+          echo "$PR_LIST_B64" | base64 -d > /tmp/merger-prs.txt
 
           while IFS='|' read -r PR_NUM PR_TITLE; do
             echo "=== Merging PR #${PR_NUM}: ${PR_TITLE} ==="
 
             # Re-verify mergeable status (may have changed after prior merge)
-            MERGEABLE=$(gh pr view "$PR_NUM" --repo "${{ github.repository }}" --json mergeable -q '.mergeable')
+            MERGEABLE=$(gh pr view "$PR_NUM" --repo "$REPO" --json mergeable -q '.mergeable')
             if [ "$MERGEABLE" = "CONFLICTING" ]; then
               echo "  Conflict detected (likely from prior merge). Skipping."
               echo "skip|#${PR_NUM}|${PR_TITLE}|conflict after prior merge" >> /tmp/merger-results.txt
@@ -173,7 +175,7 @@ jobs:
             fi
 
             # Re-verify checks still pass
-            NOT_PASSED=$(gh pr checks "$PR_NUM" --repo "${{ github.repository }}" --json state \
+            NOT_PASSED=$(gh pr checks "$PR_NUM" --repo "$REPO" --json state \
               --jq '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED")] | length' 2>/dev/null || echo "1")
             if [ "$NOT_PASSED" -gt 0 ]; then
               echo "  Checks no longer passing. Skipping."
@@ -182,7 +184,7 @@ jobs:
             fi
 
             # Re-verify no CHANGES_REQUESTED reviews
-            CHANGES_REQUESTED=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/reviews" \
+            CHANGES_REQUESTED=$(gh api "/repos/${REPO}/pulls/${PR_NUM}/reviews" \
               --jq '[.[] | select(.state == "CHANGES_REQUESTED")] | length' 2>/dev/null || echo "0")
             if [ "$CHANGES_REQUESTED" -gt 0 ]; then
               echo "  Changes requested since scan. Skipping."
@@ -191,13 +193,13 @@ jobs:
             fi
 
             # Claude merge analysis: check if review issues were addressed
-            REVIEW_COMMENTS=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/comments" \
+            REVIEW_COMMENTS=$(gh api "/repos/${REPO}/pulls/${PR_NUM}/comments" \
               --jq '.[] | "[\(.path):\(.line // .original_line)] \(.body)"' 2>/dev/null || echo "")
-            REVIEW_VERDICTS=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/reviews" \
+            REVIEW_VERDICTS=$(gh api "/repos/${REPO}/pulls/${PR_NUM}/reviews" \
               --jq '.[] | "[\(.state)] \(.user.login): \(.body)"' 2>/dev/null || echo "")
 
             if [ -n "$REVIEW_COMMENTS" ] || [ -n "$REVIEW_VERDICTS" ]; then
-              RECENT_COMMITS=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/commits" \
+              RECENT_COMMITS=$(gh api "/repos/${REPO}/pulls/${PR_NUM}/commits" \
                 --jq '.[-10:] | .[].commit.message' 2>/dev/null || echo "")
 
               DECISION=$(export PR_NUM REVIEW_COMMENTS REVIEW_VERDICTS RECENT_COMMITS; \
@@ -217,7 +219,7 @@ jobs:
               echo "  Claude: ${REASON}"
             fi
 
-            if gh pr merge "$PR_NUM" --repo "${{ github.repository }}" --squash 2>&1; then
+            if gh pr merge "$PR_NUM" --repo "$REPO" --squash 2>&1; then
               echo "  Merged!"
               echo "merged|#${PR_NUM}|${PR_TITLE}" >> /tmp/merger-results.txt
             else
