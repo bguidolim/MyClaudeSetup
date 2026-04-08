@@ -1,8 +1,8 @@
 name: '[AUTO] Week Rollover'
 
 on:
-  schedule:
-    - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
+  # schedule:
+  #   - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
   workflow_dispatch:
     inputs:
       mode:
@@ -46,8 +46,7 @@ jobs:
           if [ "$MODE" = "milestones" ]; then
             # =============================================================
             # MILESTONES MODE
-            # Uses GitHub milestones with format "YY CW WW" (e.g., "26 CW 14")
-            # TODO: Adjust milestone title format to match your convention
+            # Milestone format: "YY CW WW" (e.g., "26 CW 14")
             # =============================================================
 
             # Determine this week and last week
@@ -67,11 +66,9 @@ jobs:
             LAST_TITLE="${LAST_YEAR} CW ${LAST_WEEK_NUM}"
 
             # Due date = end of this week (Sunday)
-            # NOTE: date -j is macOS syntax. For Linux runners, use the fallback:
             DOW=$(date -u +%u)  # 1=Monday, 7=Sunday
             DAYS_TO_SUNDAY=$((7 - DOW))
-            THIS_DUE=$(date -j -v+${DAYS_TO_SUNDAY}d -u +%Y-%m-%dT12:00:00Z 2>/dev/null \
-              || date -u -d "+${DAYS_TO_SUNDAY} days" +%Y-%m-%dT12:00:00Z)
+            THIS_DUE=$(date -u -d "+${DAYS_TO_SUNDAY} days" +%Y-%m-%dT12:00:00Z)
 
             echo "This week: $THIS_TITLE (due: $THIS_DUE)"
             echo "Last week: $LAST_TITLE"
@@ -193,8 +190,7 @@ jobs:
             echo "Current: $CURRENT_CW_TITLE (start: $CURRENT_CW_START)"
 
             # Calculate next iteration
-            NEXT_CW_START=$(date -j -v+"${CURRENT_CW_DURATION}d" -f "%Y-%m-%d" "$CURRENT_CW_START" "+%Y-%m-%d" 2>/dev/null \
-              || date -d "$CURRENT_CW_START + ${CURRENT_CW_DURATION} days" "+%Y-%m-%d")
+            NEXT_CW_START=$(date -d "$CURRENT_CW_START + ${CURRENT_CW_DURATION} days" "+%Y-%m-%d")
 
             CURRENT_CW_NUM=$(echo "$CURRENT_CW_TITLE" | grep -oE '[0-9]+$')
             NEXT_CW_NUM=$((CURRENT_CW_NUM + 1))

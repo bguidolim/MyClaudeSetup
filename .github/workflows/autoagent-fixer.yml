@@ -1,8 +1,8 @@
 name: '[AUTOAGENT] Fixer'
 
 on:
-  schedule:
-    - cron: '15,45 1-22 * * *'  # Every 30 min at :15 and :45 (skip 23:00-01:00 UTC)
+  # schedule:
+  #   - cron: '15,45 1-22 * * *'  # Every 30 min at :15 and :45 during hours 01-22 UTC
 
   # Auto-trigger on failed CI for autoagent branches
   check_suite:
@@ -57,15 +57,20 @@ jobs:
     steps:
       - name: Determine PR to fix
         id: pr
+        env:
+          INPUT_PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          INPUT_MODEL: ${{ github.event.inputs.model }}
+          EVENT_NAME: ${{ github.event_name }}
+          CHECK_SHA: ${{ github.event.check_suite.head_sha }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.pr_number }}" ]; then
-            PR_NUM="${{ github.event.inputs.pr_number }}"
-            MODEL="${{ github.event.inputs.model }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_PR_NUMBER" ]; then
+            PR_NUM="$INPUT_PR_NUMBER"
+            MODEL="$INPUT_MODEL"
 
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "schedule" ]; then
             # Scan for first autoagent PR needing fixes
             echo "=== Scanning for autoagent PRs needing fixes ==="
-            MODEL="${{ github.event.inputs.model || 'claude-sonnet-4-6' }}"
+            MODEL="${INPUT_MODEL:-claude-sonnet-4-6}"
             PR_NUM=""
 
             PRS=$(gh pr list --repo "${{ github.repository }}" --state open \
@@ -132,7 +137,7 @@ jobs:
 
           else
             # check_suite event
-            PR_NUM=$(gh api "/repos/${{ github.repository }}/commits/${{ github.event.check_suite.head_sha }}/pulls" \
+            PR_NUM=$(gh api "/repos/${{ github.repository }}/commits/${CHECK_SHA}/pulls" \
               --jq '.[0].number // empty' 2>/dev/null || echo "")
             MODEL="claude-sonnet-4-6"
           fi
@@ -206,10 +211,6 @@ jobs:
 
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
-
-      # TODO: Add your project's dependency installation step
-      # - name: Install dependencies
-      #   run: npm install
 
       - name: Gather failure context
         run: |
@@ -286,7 +287,7 @@ jobs:
             git fetch origin ${BASE}
             if git merge origin/${BASE} --no-edit 2>/dev/null; then
               MERGE_SHA=$(git rev-parse HEAD)
-              if [ "$MERGE_SHA" != "$LOCAL_SHA" ]; then
+              if [ "$MERGE_SHA" != "$POST_SHA" ]; then
                 git push origin ${BRANCH}
                 echo "Merged ${BASE} into ${BRANCH} and pushed."
               else

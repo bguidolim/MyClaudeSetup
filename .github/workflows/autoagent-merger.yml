@@ -1,8 +1,8 @@
 name: '[AUTOAGENT] Merger'
 
 on:
-  schedule:
-    - cron: '0 2-22/2 * * *'  # Every 2 hours (skip 23:00-01:00 UTC)
+  # schedule:
+  #   - cron: '0 2-22/2 * * *'  # Every 2 hours from 02:00-22:00 UTC
   workflow_dispatch:
 
 concurrency:
@@ -41,7 +41,7 @@ jobs:
             exit 0
           fi
 
-          echo "$PRS" | jq -c '.' | sort -t'"' -k4 -n | while read -r PR; do
+          while IFS= read -r PR; do
             NUM=$(echo "$PR" | jq -r '.number')
             TITLE=$(echo "$PR" | jq -r '.title')
             MERGEABLE=$(echo "$PR" | jq -r '.mergeable')
@@ -87,7 +87,7 @@ jobs:
             echo "  Ready to merge!"
             echo "${NUM}|${TITLE}" >> /tmp/merger-ready-prs.txt
 
-          done
+          done < <(echo "$PRS" | jq -c '.' | sort -t'"' -k4 -n)
 
           if [ ! -f /tmp/merger-ready-prs.txt ]; then
             echo "No merge-ready PRs found."
@@ -99,7 +99,7 @@ jobs:
           echo "Found ${READY_COUNT} merge-ready PR(s)"
 
           # Pass PR list as base64 to preserve newlines
-          PR_LIST=$(cat /tmp/merger-ready-prs.txt | base64)
+          PR_LIST=$(cat /tmp/merger-ready-prs.txt | base64 -w 0)
           echo "pr_list=$PR_LIST" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
 
@@ -151,8 +151,7 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
-      # TODO: Change merge method if your repo uses squash or rebase
-      - name: Merge PRs sequentially
+      - name: Merge PRs sequentially (squash)
         id: do-merge
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
@@ -204,8 +203,8 @@ jobs:
               DECISION=$(export PR_NUM REVIEW_COMMENTS REVIEW_VERDICTS RECENT_COMMITS; \
                 git show origin/main:.github/prompts/merger.md | envsubst '$PR_NUM $REVIEW_COMMENTS $REVIEW_VERDICTS $RECENT_COMMITS' | \
                 claude -p --model claude-sonnet-4-6 --max-turns 1 --output-format text \
-                2>/dev/null || echo "MERGE
-          Claude unavailable, defaulting to merge")
+                2>&1 || echo "SKIP
+          Claude unavailable, skipping for safety")
 
               VERDICT=$(echo "$DECISION" | head -1 | tr -d '[:space:]')
               REASON=$(echo "$DECISION" | sed -n '2p')
@@ -218,7 +217,6 @@ jobs:
               echo "  Claude: ${REASON}"
             fi
 
-            # Merge (change --merge to --squash or --rebase if needed)
             if gh pr merge "$PR_NUM" --repo "${{ github.repository }}" --squash 2>&1; then
               echo "  Merged!"
               echo "merged|#${PR_NUM}|${PR_TITLE}" >> /tmp/merger-results.txt

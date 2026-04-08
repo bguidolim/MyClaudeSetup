@@ -15,7 +15,7 @@ Understand the tech stack, coding patterns, naming conventions, and project stru
 ## Step 1: Create Branch
 
 Create a branch in the current checkout:
-- Branch name: autoagent/${ISSUE_NUM}-<short-slug>
+- Branch name: autoagent/${ISSUE_NUM}-<short-slug> (this is the automated agent convention, distinct from human branch naming)
 - Base: ${BASE}
 ```bash
 git checkout -b autoagent/${ISSUE_NUM}-<short-slug>

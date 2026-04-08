@@ -24,14 +24,18 @@ jobs:
     steps:
       - name: Extract issue number from branch
         id: issue
-        run: |
-          BRANCH="${{ github.head_ref }}"
-          # Extract issue number from branch name: autoagent/353-wire-categorization-rules → 353
-          ISSUE_NUM=$(echo "$BRANCH" | sed 's|autoagent/||' | grep -oE '^[0-9]+')
-          echo "number=$ISSUE_NUM" >> $GITHUB_OUTPUT
-          echo "Issue: #$ISSUE_NUM from branch: $BRANCH"
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          # Extract issue number from branch name: autoagent/353-wire-categorization-rules → 353
+          ISSUE_NUM=$(echo "$BRANCH" | sed 's|autoagent/||' | grep -oE '^[0-9]+')
+          if [ -z "$ISSUE_NUM" ]; then
+            echo "::error::Could not extract issue number from branch: $BRANCH"
+            exit 1
+          fi
+          echo "number=$ISSUE_NUM" >> $GITHUB_OUTPUT
+          echo "Issue: #$ISSUE_NUM from branch: $BRANCH"
 
       - name: Get project item ID
         id: project
@@ -72,6 +76,11 @@ jobs:
           READY_FOR_QA_ID=$(echo "$ITEM_DATA" | jq -r '.data.organization.projectV2.field.options[] | select(.name == "Ready For QA") | .id')
           DONE_ID=$(echo "$ITEM_DATA" | jq -r '.data.organization.projectV2.field.options[] | select(.name == "Done") | .id')
 
+          if [ -z "$ITEM_ID" ]; then
+            echo "::error::Issue #$ISSUE_NUM not found on project board (check pagination or board membership)"
+            exit 1
+          fi
+
           echo "projectId=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "fieldId=$FIELD_ID" >> $GITHUB_OUTPUT
           echo "itemId=$ITEM_ID" >> $GITHUB_OUTPUT
@@ -82,6 +91,12 @@ jobs:
 
       - name: Move to READY FOR QA (on PR opened)
         if: github.event.action == 'opened'
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           ISSUE_NUM="${{ steps.issue.outputs.number }}"
           echo "PR opened for #${ISSUE_NUM}  - moving to READY FOR QA"
@@ -102,17 +117,19 @@ jobs:
           echo "#${ISSUE_NUM} → READY FOR QA"
 
           # Notify via Telegram
-          PR_URL="${{ github.event.pull_request.html_url }}"
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          TELEGRAM_MSG="PR ready for QA: #${ISSUE_NUM}%0A${PR_TITLE}%0A${PR_URL}"
-          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=${TELEGRAM_MSG}" > /dev/null 2>&1 || true
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          TELEGRAM_MSG="PR ready for QA: #${ISSUE_NUM} - ${PR_TITLE}
+          ${PR_URL}"
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT}" \
+            --data-urlencode "text=${TELEGRAM_MSG}" > /dev/null 2>&1 || true
 
       - name: Move to DONE (on PR merged)
         if: github.event.action == 'closed' && github.event.pull_request.merged == true
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           ISSUE_NUM="${{ steps.issue.outputs.number }}"
           echo "PR merged for #${ISSUE_NUM}  - moving to DONE"
@@ -133,15 +150,17 @@ jobs:
           echo "#${ISSUE_NUM} → DONE"
 
           # Notify via Telegram
-          TELEGRAM_MSG="Merged and done: #${ISSUE_NUM}  - ${{ github.event.pull_request.title }}"
-          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=${TELEGRAM_MSG}" > /dev/null 2>&1 || true
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          TELEGRAM_MSG="Merged and done: #${ISSUE_NUM}  - ${PR_TITLE}"
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT}" \
+            --data-urlencode "text=${TELEGRAM_MSG}" > /dev/null 2>&1 || true
 
       - name: Move back to TODO (on PR closed without merge)
         if: github.event.action == 'closed' && github.event.pull_request.merged == false
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           ISSUE_NUM="${{ steps.issue.outputs.number }}"
           echo "PR closed without merge for #${ISSUE_NUM}  - moving back to TODO"
@@ -177,8 +196,6 @@ jobs:
 
           # Notify via Telegram
           TELEGRAM_MSG="PR closed without merge: #${ISSUE_NUM}  - back to TODO"
-          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=${TELEGRAM_MSG}" > /dev/null 2>&1 || true
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT}" \
+            --data-urlencode "text=${TELEGRAM_MSG}" > /dev/null 2>&1 || true
