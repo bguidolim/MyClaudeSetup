@@ -296,9 +296,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.AGENT_PAT }}
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Fetch issue details
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -308,7 +305,6 @@ jobs:
 
       - name: Implement with Claude
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
           BASE: ${{ needs.prepare.outputs.base_branch }}
           MODEL: ${{ needs.prepare.outputs.model }}

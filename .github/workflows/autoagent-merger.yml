@@ -148,14 +148,10 @@ jobs:
           sparse-checkout: .github/prompts
           token: ${{ secrets.AGENT_PAT }}
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Merge PRs sequentially (squash)
         id: do-merge
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_LIST_B64: ${{ needs.prepare.outputs.pr_list }}
           REPO: ${{ github.repository }}
         run: |
