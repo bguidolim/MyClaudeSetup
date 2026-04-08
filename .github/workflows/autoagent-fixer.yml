@@ -1,0 +1,397 @@
+name: '[AUTOAGENT] Fixer'
+
+on:
+  schedule:
+    - cron: '15,45 1-22 * * *'  # Every 30 min at :15 and :45 (skip 23:00-01:00 UTC)
+
+  # Auto-trigger on failed CI for autoagent branches
+  check_suite:
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to fix (leave empty to auto-scan)'
+        required: false
+        type: string
+      fix_type:
+        description: 'What to fix'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ci
+          - review
+          - conflict
+      model:
+        description: 'Claude model to use'
+        required: false
+        default: 'claude-opus-4-6'
+        type: choice
+        options:
+          - claude-sonnet-4-6
+          - claude-opus-4-6
+
+jobs:
+  prepare:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'check_suite' && github.event.check_suite.conclusion == 'failure')
+    runs-on: self-hosted
+    permissions:
+      pull-requests: read
+      issues: read
+      checks: read
+      actions: read
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.pr.outputs.skip }}
+      number: ${{ steps.pr.outputs.number }}
+      branch: ${{ steps.pr.outputs.branch }}
+      base: ${{ steps.pr.outputs.base }}
+      model: ${{ steps.pr.outputs.model }}
+      start_message: ${{ steps.msg.outputs.start_message }}
+
+    steps:
+      - name: Determine PR to fix
+        id: pr
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.pr_number }}" ]; then
+            PR_NUM="${{ github.event.inputs.pr_number }}"
+            MODEL="${{ github.event.inputs.model }}"
+
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+            # Scan for first autoagent PR needing fixes
+            echo "=== Scanning for autoagent PRs needing fixes ==="
+            MODEL="${{ github.event.inputs.model || 'claude-sonnet-4-6' }}"
+            PR_NUM=""
+
+            PRS=$(gh pr list --repo "${{ github.repository }}" --state open \
+              --json number,headRefName,mergeable \
+              --jq '.[] | select(.headRefName | startswith("autoagent/"))' 2>/dev/null || echo "")
+
+            if [ -z "$PRS" ]; then
+              echo "No open autoagent PRs found."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            # Get PR numbers already being fixed (in_progress or queued fixer runs)
+            ACTIVE_PRS=""
+            for STATUS in in_progress queued; do
+              PRNUMS=$(gh api "/repos/${{ github.repository }}/actions/workflows/autoagent-fixer.yml/runs?status=${STATUS}&per_page=20" \
+                --jq '.workflow_runs[].inputs.pr_number // empty' 2>/dev/null || echo "")
+              ACTIVE_PRS="${ACTIVE_PRS}${PRNUMS}"$'\n'
+            done
+            echo "Active fixer PRs: $(echo "$ACTIVE_PRS" | grep -v '^$' | tr '\n' ' ')"
+
+            # Check each PR for issues, skipping ones already being fixed
+            PR_NUM=""
+            while IFS= read -r PR; do
+              [ -z "$PR" ] && continue
+              NUM=$(echo "$PR" | jq -r '.number')
+              MERGEABLE=$(echo "$PR" | jq -r '.mergeable')
+
+              # Skip if already being fixed
+              if echo "$ACTIVE_PRS" | grep -q "^${NUM}$"; then
+                echo "PR #${NUM} already has an active fixer run. Skipping."
+                continue
+              fi
+
+              NEEDS_FIX="false"
+
+              # Failed or cancelled CI
+              NOT_OK=$(gh pr checks "$NUM" --json state \
+                --jq '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED")] | length' 2>/dev/null || echo "0")
+              [ "$NOT_OK" -gt 0 ] && NEEDS_FIX="true"
+
+              # Changes requested
+              CHANGES=$(gh api "/repos/${{ github.repository }}/pulls/${NUM}/reviews" \
+                --jq '[.[] | select(.state == "CHANGES_REQUESTED")] | length' 2>/dev/null || echo "0")
+              [ "$CHANGES" -gt 0 ] && NEEDS_FIX="true"
+
+              # Merge conflicts
+              [ "$MERGEABLE" = "CONFLICTING" ] && NEEDS_FIX="true"
+
+              if [ "$NEEDS_FIX" = "true" ]; then
+                PR_NUM="$NUM"
+                echo "Found PR needing fixes: #${PR_NUM}"
+                break
+              fi
+            done < <(echo "$PRS" | jq -c '.')
+
+            if [ -n "$PR_NUM" ]; then
+              echo "Selected PR #${PR_NUM} for fixing"
+            else
+              echo "All autoagent PRs are clean (or already being fixed)."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+          else
+            # check_suite event
+            PR_NUM=$(gh api "/repos/${{ github.repository }}/commits/${{ github.event.check_suite.head_sha }}/pulls" \
+              --jq '.[0].number // empty' 2>/dev/null || echo "")
+            MODEL="claude-sonnet-4-6"
+          fi
+
+          if [ -z "$PR_NUM" ]; then
+            echo "No PR found. Skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Only fix autoagent PRs
+          PR_BRANCH=$(gh pr view "$PR_NUM" --json headRefName -q '.headRefName')
+          if [[ ! "$PR_BRANCH" =~ ^autoagent/ ]]; then
+            echo "PR #$PR_NUM is not an autoagent branch. Skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          PR_BASE=$(gh pr view "$PR_NUM" --json baseRefName -q '.baseRefName')
+          echo "number=$PR_NUM" >> $GITHUB_OUTPUT
+          echo "branch=$PR_BRANCH" >> $GITHUB_OUTPUT
+          echo "base=$PR_BASE" >> $GITHUB_OUTPUT
+          echo "model=$MODEL" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+
+      - name: Build start message
+        id: msg
+        if: steps.pr.outputs.skip != 'true'
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo 'start_message<<EOF'
+            echo "[AUTOAGENT] Fixer  - PR #${{ steps.pr.outputs.number }}"
+            echo "${RUN_URL}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  notify-start:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    uses: ./.github/workflows/telegram.yml
+    with:
+      message: ${{ needs.prepare.outputs.start_message }}
+    secrets:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  fix:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: self-hosted
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+      checks: read
+      actions: read
+    timeout-minutes: 60
+    outputs:
+      after_message: ${{ steps.summary.outputs.after_message }}
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.AGENT_PAT }}
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      # TODO: Add your project's dependency installation step
+      # - name: Install dependencies
+      #   run: npm install
+
+      - name: Gather failure context
+        run: |
+          PR_NUM="${{ needs.prepare.outputs.number }}"
+          BRANCH="${{ needs.prepare.outputs.branch }}"
+
+          echo "# Failure Context for PR #${PR_NUM}" > /tmp/failure-context.md
+
+          # CI check results
+          echo "" >> /tmp/failure-context.md
+          echo "## CI Check Results" >> /tmp/failure-context.md
+          gh pr checks "$PR_NUM" 2>/dev/null >> /tmp/failure-context.md || echo "Could not fetch checks" >> /tmp/failure-context.md
+
+          # Failed run logs (strip ::error:: markers to avoid false step failures)
+          FAILED_RUN=$(gh run list --branch "$BRANCH" --status failure --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo "")
+          if [ -n "$FAILED_RUN" ]; then
+            echo "" >> /tmp/failure-context.md
+            echo "## Failed Run Logs (last 300 lines)" >> /tmp/failure-context.md
+            gh run view "$FAILED_RUN" --log-failed 2>/dev/null | tail -300 | sed 's/::error::/ERROR:/g' >> /tmp/failure-context.md || true
+          fi
+
+          # Code review comments
+          echo "" >> /tmp/failure-context.md
+          echo "## Code Review Comments" >> /tmp/failure-context.md
+          gh api "/repos/${{ github.repository }}/pulls/$PR_NUM/comments" \
+            --jq '.[] | "### \(.path):\(.line // .original_line)\n\(.body)\n"' >> /tmp/failure-context.md || echo "No review comments" >> /tmp/failure-context.md
+
+          # PR review verdicts
+          gh api "/repos/${{ github.repository }}/pulls/$PR_NUM/reviews" \
+            --jq '.[] | select(.state == "CHANGES_REQUESTED") | "### Review by \(.user.login):\n\(.body)\n"' >> /tmp/failure-context.md || true
+
+          # Merge conflict check
+          MERGEABLE=$(gh pr view "$PR_NUM" --json mergeable -q '.mergeable')
+          if [ "$MERGEABLE" = "CONFLICTING" ]; then
+            echo "" >> /tmp/failure-context.md
+            echo "## MERGE CONFLICT" >> /tmp/failure-context.md
+            echo "PR has conflicts with base branch (${{ needs.prepare.outputs.base }}). Rebase required." >> /tmp/failure-context.md
+          fi
+
+          sed 's/::\(error\|warning\)::/[\1]/g' /tmp/failure-context.md
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+
+      - name: Run Claude Fixer
+        id: claude-run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          echo "pre_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+          PR_NUM="${{ needs.prepare.outputs.number }}"
+          BRANCH="${{ needs.prepare.outputs.branch }}"
+          BASE="${{ needs.prepare.outputs.base }}"
+          CONTEXT=$(cat /tmp/failure-context.md)
+
+          export PR_NUM BRANCH BASE CONTEXT
+          git show origin/main:.github/prompts/fixer.md | envsubst '$PR_NUM $BRANCH $BASE $CONTEXT' | \
+            claude -p --verbose --output-format stream-json --model "${{ needs.prepare.outputs.model }}" --max-turns 500 \
+              --permission-mode auto
+
+      - name: Re-trigger CI if no changes were made
+        run: |
+          BRANCH="${{ needs.prepare.outputs.branch }}"
+          BASE="${{ needs.prepare.outputs.base }}"
+          PR_NUM="${{ needs.prepare.outputs.number }}"
+
+          # Check if Claude made any new commits
+          # Compare HEAD against pre-Claude SHA (can't use remote — Claude pushes its own commits)
+          PRE_SHA="${{ steps.claude-run.outputs.pre_sha }}"
+          POST_SHA=$(git rev-parse HEAD)
+
+          if [ "$PRE_SHA" = "$POST_SHA" ]; then
+            echo "No new commits from fixer. Merging ${BASE} to re-trigger CI."
+            git fetch origin ${BASE}
+            if git merge origin/${BASE} --no-edit 2>/dev/null; then
+              MERGE_SHA=$(git rev-parse HEAD)
+              if [ "$MERGE_SHA" != "$LOCAL_SHA" ]; then
+                git push origin ${BRANCH}
+                echo "Merged ${BASE} into ${BRANCH} and pushed."
+              else
+                echo "Branch already up to date with ${BASE}. Pushing empty commit to re-trigger CI."
+                git commit --allow-empty -m "chore: re-trigger CI for PR #${PR_NUM}"
+                git push origin ${BRANCH}
+              fi
+            else
+              echo "Merge conflict. Skipping re-trigger."
+              git merge --abort
+            fi
+          else
+            echo "Fixer made changes. CI will be triggered by the push."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+
+      - name: Capture fix summary
+        id: summary
+        if: always()
+        run: |
+          PR_NUM="${{ needs.prepare.outputs.number }}"
+
+          # Human-readable summary from commit messages
+          COMMITS=$(git log --pretty="- %s" origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | head -20 || echo "- No commits found")
+          FILES_CHANGED=$(git diff --name-only origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | wc -l | tr -d ' ')
+          BRANCH="${{ needs.prepare.outputs.branch }}"
+
+          # Job summary
+          {
+            echo "## [AUTOAGENT] Fixer"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **PR** | #${PR_NUM} |"
+            echo "| **Status** | ${{ job.status }} |"
+            echo "| **Model** | ${{ needs.prepare.outputs.model }} |"
+            echo "| **Branch** | \`${BRANCH}\` |"
+            echo "| **Base** | \`${{ needs.prepare.outputs.base }}\` |"
+            echo "| **Files changed** | ${FILES_CHANGED} |"
+            echo ""
+            echo "### Commits"
+            echo "${COMMITS}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Telegram message
+          {
+            echo 'after_message<<EOF'
+            echo "[AUTOAGENT] Fixer done - PR #${PR_NUM}"
+            echo ""
+            echo "Changes (${FILES_CHANGED} files):"
+            echo "${COMMITS}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Re-request reviewers
+        run: |
+          PR_NUM="${{ needs.prepare.outputs.number }}"
+          REVIEWERS=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/reviews" \
+            --jq '[.[].user.login] | unique' 2>/dev/null || echo "[]")
+          if [ "$REVIEWERS" != "[]" ]; then
+            echo "$REVIEWERS" | jq -r '.[]' | while read -r USER; do
+              gh api "/repos/${{ github.repository }}/pulls/${PR_NUM}/requested_reviewers" \
+                -X POST -f "reviewers[]=$USER" --silent || true
+              echo "Re-requested review from: $USER"
+            done
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+
+      - name: Log run
+        if: always()
+        run: |
+          PR_NUM="${{ needs.prepare.outputs.number }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          STATUS="${{ job.status }}"
+
+          COMMITS=$(git log --pretty="- %s" origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | head -20 || echo "- No new commits")
+          FILES_CHANGED=$(git diff --name-only origin/${{ needs.prepare.outputs.base }}..HEAD 2>/dev/null | wc -l | tr -d ' ')
+
+          if [ "$STATUS" = "success" ]; then
+            ICON="🔧"
+          else
+            ICON="❌"
+          fi
+
+          BODY="${ICON} **Fixer run** - [workflow run](${RUN_URL})
+
+          **Status:** ${STATUS}
+          **Model:** ${{ needs.prepare.outputs.model }}
+          **Files changed:** ${FILES_CHANGED}
+
+          **Commits:**
+          ${COMMITS}"
+
+          gh pr comment "$PR_NUM" --body "$BODY"
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+
+  notify-done:
+    needs: fix
+    if: needs.fix.outputs.after_message != ''
+    uses: ./.github/workflows/telegram.yml
+    with:
+      message: ${{ needs.fix.outputs.after_message }}
+    secrets:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
