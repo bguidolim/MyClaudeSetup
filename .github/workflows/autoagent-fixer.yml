@@ -251,7 +251,7 @@ jobs:
           fi
 
           # Sanitize workflow command markers in-place
-          sed -i 's/::\(error\|warning\)::/[\1]/g' /tmp/failure-context.md
+          sed -i '' 's/::\(error\|warning\)::/[\1]/g' /tmp/failure-context.md
 
       - name: Run Claude Fixer
         id: claude-run
