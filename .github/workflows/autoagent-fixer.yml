@@ -4,8 +4,9 @@ on:
   # schedule:
   #   - cron: '15,45 1-22 * * *'  # Every 30 min at :15 and :45 during hours 01-22 UTC
 
-  # Auto-trigger on failed CI for autoagent branches
-  check_suite:
+  # Auto-trigger on failed CI (check_suite doesn't work for GitHub Actions' own check suites)
+  workflow_run:
+    workflows: ["PR Checks"]
     types: [completed]
 
   workflow_dispatch:
@@ -38,7 +39,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'check_suite' && github.event.check_suite.conclusion == 'failure')
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure')
     runs-on: self-hosted
     permissions:
       pull-requests: read
@@ -58,10 +59,11 @@ jobs:
       - name: Determine PR to fix
         id: pr
         env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
           INPUT_PR_NUMBER: ${{ github.event.inputs.pr_number }}
           INPUT_MODEL: ${{ github.event.inputs.model }}
           EVENT_NAME: ${{ github.event_name }}
-          CHECK_SHA: ${{ github.event.check_suite.head_sha }}
+          CHECK_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_PR_NUMBER" ]; then
             PR_NUM="$INPUT_PR_NUMBER"
@@ -136,7 +138,7 @@ jobs:
             fi
 
           else
-            # check_suite event
+            # workflow_run event (CI failure auto-trigger)
             PR_NUM=$(gh api "/repos/${{ github.repository }}/commits/${CHECK_SHA}/pulls" \
               --jq '.[0].number // empty' 2>/dev/null || echo "")
             MODEL="claude-sonnet-4-6"
@@ -162,8 +164,6 @@ jobs:
           echo "base=$PR_BASE" >> $GITHUB_OUTPUT
           echo "model=$MODEL" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PAT }}
 
       - name: Build start message
         id: msg
@@ -281,7 +281,7 @@ jobs:
           POST_SHA=$(git rev-parse HEAD)
 
           if [ "$PRE_SHA" = "$POST_SHA" ]; then
-            # Guard against infinite re-trigger loops (check_suite → fixer → empty commit → check_suite)
+            # Guard against infinite re-trigger loops (CI failure → fixer → empty commit → CI failure)
             LAST_MSG=$(git log -1 --pretty=%s)
             if [[ "$LAST_MSG" == "chore: re-trigger CI for PR #"* ]]; then
               echo "Already re-triggered CI on previous run. Stopping to prevent loop."
