@@ -1,5 +1,4 @@
 import Foundation
-import Yams
 
 /// Manages the `~/.mcs/registry.yaml` file that tracks installed external packs.
 struct PackRegistryFile {
@@ -46,26 +45,12 @@ struct PackRegistryFile {
 
     /// Load the registry from disk. Returns empty registry if the file doesn't exist.
     func load() throws -> RegistryData {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: path.path) else {
-            return RegistryData()
-        }
-        let content = try String(contentsOf: path, encoding: .utf8)
-        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return RegistryData()
-        }
-        return try YAMLDecoder().decode(RegistryData.self, from: content)
+        try YAMLFile.load(RegistryData.self, from: path) ?? RegistryData()
     }
 
     /// Write the registry to disk, creating parent directories if needed.
     func save(_ data: RegistryData) throws {
-        let fm = FileManager.default
-        let dir = path.deletingLastPathComponent()
-        if !fm.fileExists(atPath: dir.path) {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        let yaml = try YAMLEncoder().encode(data)
-        try yaml.write(to: path, atomically: true, encoding: .utf8)
+        try YAMLFile.save(data, to: path)
     }
 
     // MARK: - Queries
