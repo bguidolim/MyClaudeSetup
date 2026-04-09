@@ -1,4 +1,5 @@
 import Foundation
+import Yams
 
 /// User preferences stored at `~/.mcs/config.yaml`.
 /// All fields are optional — `nil` means "never configured".
@@ -61,8 +62,14 @@ struct MCSConfig: Codable {
     static func load(from path: URL, output: CLIOutput? = nil) -> MCSConfig {
         do {
             return try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
-        } catch {
+        } catch let error as DecodingError {
             output?.warn("Config file is corrupt (\(path.lastPathComponent)): \(error.localizedDescription)")
+            return MCSConfig()
+        } catch let error as YamlError {
+            output?.warn("Config file is corrupt (\(path.lastPathComponent)): \(error.localizedDescription)")
+            return MCSConfig()
+        } catch {
+            output?.warn("Could not read config file: \(error.localizedDescription)")
             return MCSConfig()
         }
     }
