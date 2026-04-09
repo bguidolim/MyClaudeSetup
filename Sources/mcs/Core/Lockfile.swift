@@ -47,13 +47,7 @@ struct Lockfile: Codable, Equatable {
     /// Load lockfile from a project directory. Returns nil if the file doesn't exist.
     static func load(projectRoot: URL) throws -> Lockfile? {
         let path = projectRoot.appendingPathComponent(filename)
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: path.path) else { return nil }
-        let content = try String(contentsOf: path, encoding: .utf8)
-        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return nil
-        }
-        return try YAMLDecoder().decode(Lockfile.self, from: content)
+        return try YAMLFile.load(Lockfile.self, from: path)
     }
 
     /// Write lockfile to a project directory.

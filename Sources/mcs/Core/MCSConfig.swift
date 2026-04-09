@@ -1,5 +1,4 @@
 import Foundation
-import Yams
 
 /// User preferences stored at `~/.mcs/config.yaml`.
 /// All fields are optional — `nil` means "never configured".
@@ -60,23 +59,8 @@ struct MCSConfig: Codable {
     /// Load config from disk. Returns empty config if file is missing.
     /// Warns via `output` if the file exists but is corrupt.
     static func load(from path: URL, output: CLIOutput? = nil) -> MCSConfig {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: path.path) else { return MCSConfig() }
-
-        let content: String
         do {
-            content = try String(contentsOf: path, encoding: .utf8)
-        } catch {
-            output?.warn("Could not read config file: \(error.localizedDescription)")
-            return MCSConfig()
-        }
-
-        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return MCSConfig()
-        }
-
-        do {
-            return try YAMLDecoder().decode(MCSConfig.self, from: content)
+            return try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
         } catch {
             output?.warn("Config file is corrupt (\(path.lastPathComponent)): \(error.localizedDescription)")
             return MCSConfig()
@@ -85,13 +69,7 @@ struct MCSConfig: Codable {
 
     /// Save config to disk, creating parent directories if needed.
     func save(to path: URL) throws {
-        let fm = FileManager.default
-        let dir = path.deletingLastPathComponent()
-        if !fm.fileExists(atPath: dir.path) {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        let yaml = try YAMLEncoder().encode(self)
-        try yaml.write(to: path, atomically: true, encoding: .utf8)
+        try YAMLFile.save(self, to: path)
     }
 
     // MARK: - Key Access

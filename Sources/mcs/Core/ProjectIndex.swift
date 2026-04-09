@@ -1,5 +1,4 @@
 import Foundation
-import Yams
 
 /// Lightweight index tracking which projects use which packs (`~/.mcs/projects.yaml`).
 /// Used for reference counting global resources (brew packages, plugins) before removal.
@@ -30,26 +29,12 @@ struct ProjectIndex {
 
     /// Load from disk. Returns empty index if the file doesn't exist.
     func load() throws -> IndexData {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: path.path) else {
-            return IndexData()
-        }
-        let content = try String(contentsOf: path, encoding: .utf8)
-        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return IndexData()
-        }
-        return try YAMLDecoder().decode(IndexData.self, from: content)
+        try YAMLFile.load(IndexData.self, from: path) ?? IndexData()
     }
 
     /// Write to disk, creating parent directories if needed.
     func save(_ data: IndexData) throws {
-        let fm = FileManager.default
-        let dir = path.deletingLastPathComponent()
-        if !fm.fileExists(atPath: dir.path) {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        let yaml = try YAMLEncoder().encode(data)
-        try yaml.write(to: path, atomically: true, encoding: .utf8)
+        try YAMLFile.save(data, to: path)
     }
 
     // MARK: - Mutations
