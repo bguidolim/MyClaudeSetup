@@ -201,7 +201,7 @@ enum ComponentInstallAction {
     case mcpServer(MCPServerConfig)     // Register via `claude mcp add -s <scope>`
     case plugin(name: String)            // Install via `claude plugin install`
     case brewInstall(package: String)    // Install via Homebrew
-    case shellCommand(command: String)   // Run arbitrary shell command
+    case shellCommand(command: String, interactive: Bool = false)  // Run shell command (interactive: PTY for sudo)
     case settingsMerge                   // Deep-merge settings (project-level)
     case gitignoreEntries(entries)       // Add to global gitignore
     case copyPackFile(source, dest, type) // Copy from pack checkout to project .claude/

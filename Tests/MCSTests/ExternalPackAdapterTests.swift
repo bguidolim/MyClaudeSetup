@@ -135,6 +135,30 @@ struct ExternalPackAdapterTests {
         }
     }
 
+    @Test("Adapter passes through shellCommand interactive flag")
+    func shellCommandInteractivePassthrough() throws {
+        let manifest = manifestWithComponents([
+            ExternalComponentDefinition(
+                id: "test-pack.interactive-shell",
+                displayName: "Interactive install",
+                description: "Install with sudo",
+                type: .configuration,
+                dependencies: nil,
+                isRequired: nil,
+                installAction: .shellCommand(command: "sudo make install", interactive: true),
+                doctorChecks: nil
+            ),
+        ])
+        let (adapter, _) = try makeAdapter(manifest: manifest)
+        let component = adapter.components[0]
+        if case let .shellCommand(command, interactive) = component.installAction {
+            #expect(command == "sudo make install")
+            #expect(interactive == true)
+        } else {
+            Issue.record("Expected .shellCommand action")
+        }
+    }
+
     @Test("Adapter converts copyPackFile component with skill type")
     func copyPackFileComponent() throws {
         let manifest = manifestWithComponents([

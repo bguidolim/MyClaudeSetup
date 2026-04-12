@@ -910,6 +910,40 @@ struct ExternalPackManifestTests {
         #expect(command == "npx -y skills add my-skill -g -a claude-code -y")
     }
 
+    @Test("Deserialize shellCommand install action with interactive flag")
+    func shellCommandInteractiveAction() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.install
+            displayName: Install tool
+            description: Install via interactive shell
+            type: configuration
+            installAction:
+              type: shellCommand
+              command: "curl -fsSL https://example.com/install.sh | sh"
+              interactive: true
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        guard case let .shellCommand(command, interactive) = manifest.components?[0].installAction else {
+            Issue.record("Expected shellCommand install action")
+            return
+        }
+        #expect(command == "curl -fsSL https://example.com/install.sh | sh")
+        #expect(interactive == true)
+    }
+
     @Test("Deserialize gitignoreEntries install action")
     func gitignoreEntriesAction() throws {
         let yaml = """
@@ -2413,6 +2447,68 @@ struct ExternalPackManifestTests {
             Issue.record("Expected shellCommand"); return
         }
         #expect(command == "npx -y skills add xcodebuildmcp -g")
+    }
+
+    @Test("Shorthand shell: shellInteractive true is decoded")
+    func shorthandShellInteractiveTrue() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.installer
+            description: Install via interactive shell
+            type: configuration
+            shell: "sudo make install"
+            shellInteractive: true
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        let comp = try #require(manifest.components?.first)
+
+        guard case let .shellCommand(command, interactive) = comp.installAction else {
+            Issue.record("Expected shellCommand"); return
+        }
+        #expect(command == "sudo make install")
+        #expect(interactive == true)
+    }
+
+    @Test("Shorthand shell: shellInteractive defaults to false when omitted")
+    func shorthandShellInteractiveDefaultsFalse() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.tool
+            description: Install via shell
+            type: configuration
+            shell: "echo hello"
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        let comp = try #require(manifest.components?.first)
+
+        guard case let .shellCommand(_, interactive) = comp.installAction else {
+            Issue.record("Expected shellCommand"); return
+        }
+        #expect(interactive == false)
     }
 
     // MARK: - Shorthand: hook

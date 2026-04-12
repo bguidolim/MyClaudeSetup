@@ -256,10 +256,26 @@ Infers: `type: configuration`, `installAction: gitignoreEntries`
 | Field | Type | Description |
 |-------|------|-------------|
 | `shell` | `String` | Shell command to execute |
+| `shellInteractive` | `Bool` | When `true`, allocates a PTY so commands like `sudo` can prompt for passwords securely. Default: `false` |
 
 **Does not infer `type`** — you must provide `type:` explicitly. This is because a shell command could install anything (a brew package, a skill, a tool).
 
 No auto-derived doctor check — add `doctorChecks` if verification is needed.
+
+Use `shellInteractive: true` when the command may need terminal access (e.g. install scripts that use `sudo`):
+
+```yaml
+- id: ollama
+  description: Local LLM runtime
+  type: configuration
+  shell: "curl -fsSL https://ollama.com/install.sh | sh"
+  shellInteractive: true
+  doctorChecks:
+    - type: commandExists
+      name: "Ollama installed"
+      command: ollama
+      args: ["--version"]
+```
 
 ---
 
@@ -284,7 +300,7 @@ The explicit form with `type` + `installAction` is always supported:
 | `mcpServer` | `name`, `command`, `args`, `env`, `transport`, `url`, `scope` | Register MCP server |
 | `plugin` | `name` | Install Claude Code plugin |
 | `brewInstall` | `package` | Install Homebrew package |
-| `shellCommand` | `command` | Run shell command |
+| `shellCommand` | `command`, `interactive` | Run shell command (`interactive`: allocate PTY, default `false`) |
 | `gitignoreEntries` | `entries` | Add to global gitignore |
 | `settingsMerge` | *(none)* | Merge settings (internal) |
 | `settingsFile` | `source` | Merge settings from file |
