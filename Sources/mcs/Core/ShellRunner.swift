@@ -208,16 +208,25 @@ struct ShellRunner: ShellRunning {
 
         if pid == 0 {
             // ── Child process ──
+            // After fork, only async-signal-safe functions are safe. Avoid Swift
+            // runtime calls (String interpolation, ARC) — they can deadlock on
+            // locks held by other threads in the parent at fork time.
             if let cwd = workingDirectory {
                 if chdir(cwd) != 0 {
-                    let msg = "chdir failed: \(String(cString: strerror(errno)))\n"
-                    msg.withCString { _ = write(STDERR_FILENO, $0, strlen($0)) }
+                    // Use only C functions — no Swift String operations.
+                    let err = strerror(errno)
+                    _ = write(STDERR_FILENO, "chdir failed: ", 14)
+                    if let err { _ = write(STDERR_FILENO, err, strlen(err)) }
+                    _ = write(STDERR_FILENO, "\n", 1)
                     _exit(126)
                 }
             }
-            execve(executable, argv, envp)
-            let msg = "execve failed: \(String(cString: strerror(errno)))\n"
-            msg.withCString { _ = write(STDERR_FILENO, $0, strlen($0)) }
+            // Use argv[0] (already a C string from strdup) instead of the Swift String.
+            execve(argv[0], argv, envp)
+            let err = strerror(errno)
+            _ = write(STDERR_FILENO, "execve failed: ", 15)
+            if let err { _ = write(STDERR_FILENO, err, strlen(err)) }
+            _ = write(STDERR_FILENO, "\n", 1)
             _exit(127)
         }
 
@@ -235,49 +244,46 @@ struct ShellRunner: ShellRunning {
         // Ensure terminal is restored even if we exit early or the process is interrupted.
         defer {
             if hasTerminal {
-                if tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios) != 0 {
-                    tcsetattr(STDIN_FILENO, TCSADRAIN, &originalTermios)
-                }
+                tcsetattr(STDIN_FILENO, TCSADRAIN, &originalTermios)
             }
             close(ptyFD)
         }
 
-        // Bridge I/O between the real terminal and the PTY.
-        // Uses select() to multiplex stdin → PTY and PTY → stdout.
-        let stdinFD = STDIN_FILENO
-        let stdoutFD = STDOUT_FILENO
+        // Bridge I/O between the real terminal and the PTY using poll().
+        var fds: [pollfd] = [
+            pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0),
+            pollfd(fd: ptyFD, events: Int16(POLLIN), revents: 0),
+        ]
         var buf = [UInt8](repeating: 0, count: 4096)
-        var stdinOpen = true
 
         bridgeLoop: while true {
-            var readSet = fd_set()
-            fdZero(&readSet)
-            if stdinOpen { fdSet(stdinFD, set: &readSet) }
-            fdSet(ptyFD, set: &readSet)
+            fds[0].revents = 0
+            fds[1].revents = 0
 
-            let maxFD = max(stdinOpen ? stdinFD : 0, ptyFD) + 1
-            let ready = select(maxFD, &readSet, nil, nil, nil)
+            let ready = poll(&fds, nfds_t(fds.count), -1)
             if ready < 0 {
                 if errno == EINTR { continue } // Retry on signal interruption
                 break
             }
-            if ready == 0 { continue }
 
             // Terminal → PTY (user typing, including password input)
-            if stdinOpen, fdIsSet(stdinFD, set: &readSet) {
-                let n = read(stdinFD, &buf, buf.count)
+            if fds[0].revents & Int16(POLLIN) != 0 {
+                let n = read(STDIN_FILENO, &buf, buf.count)
                 if n <= 0 {
-                    stdinOpen = false // stdin EOF — stop monitoring
+                    // stdin EOF — stop monitoring, let PTY drain remaining output
+                    fds[0].fd = -1
                 } else {
-                    writeAll(fd: ptyFD, buf: &buf, count: n)
+                    writeAll(fd: ptyFD, buf: buf, count: n)
                 }
             }
 
             // PTY → Terminal (command output, prompts, progress bars)
-            if fdIsSet(ptyFD, set: &readSet) {
+            if fds[1].revents & Int16(POLLIN | POLLHUP) != 0 {
                 let n = read(ptyFD, &buf, buf.count)
                 if n <= 0 { break bridgeLoop } // Child closed the PTY
-                writeAll(fd: stdoutFD, buf: &buf, count: n)
+                writeAll(fd: STDOUT_FILENO, buf: buf, count: n)
+            } else if fds[1].revents & Int16(POLLHUP) != 0 {
+                break bridgeLoop
             }
         }
 
@@ -298,7 +304,7 @@ struct ShellRunner: ShellRunning {
     }
 
     /// Write all bytes to a file descriptor, retrying on partial writes and EINTR.
-    private func writeAll(fd: Int32, buf: inout [UInt8], count: Int) {
+    private func writeAll(fd: Int32, buf: [UInt8], count: Int) {
         buf.withUnsafeBufferPointer { ptr in
             var offset = 0
             while offset < count {
@@ -309,35 +315,6 @@ struct ShellRunner: ShellRunning {
                 }
                 offset += n
             }
-        }
-    }
-
-    // MARK: - fd_set Helpers
-
-    // Swift doesn't expose FD_ZERO / FD_SET / FD_ISSET macros.
-
-    private func fdZero(_ set: inout fd_set) {
-        withUnsafeMutablePointer(to: &set) { ptr in
-            let rawPtr = UnsafeMutableRawPointer(ptr)
-            memset(rawPtr, 0, MemoryLayout<fd_set>.size)
-        }
-    }
-
-    private func fdSet(_ fd: Int32, set: inout fd_set) {
-        let intOffset = Int(fd) / (MemoryLayout<Int32>.size * 8)
-        let bitOffset = Int(fd) % (MemoryLayout<Int32>.size * 8)
-        withUnsafeMutablePointer(to: &set) { ptr in
-            let rawPtr = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: Int32.self)
-            rawPtr[intOffset] |= Int32(1 << bitOffset)
-        }
-    }
-
-    private func fdIsSet(_ fd: Int32, set: inout fd_set) -> Bool {
-        let intOffset = Int(fd) / (MemoryLayout<Int32>.size * 8)
-        let bitOffset = Int(fd) % (MemoryLayout<Int32>.size * 8)
-        return withUnsafeMutablePointer(to: &set) { ptr in
-            let rawPtr = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: Int32.self)
-            return rawPtr[intOffset] & Int32(1 << bitOffset) != 0
         }
     }
 }
