@@ -128,8 +128,32 @@ struct ExternalPackAdapterTests {
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         let component = adapter.components[0]
-        if case let .shellCommand(command) = component.installAction {
+        if case let .shellCommand(command, _) = component.installAction {
             #expect(command == "echo hello")
+        } else {
+            Issue.record("Expected .shellCommand action")
+        }
+    }
+
+    @Test("Adapter passes through shellCommand interactive flag")
+    func shellCommandInteractivePassthrough() throws {
+        let manifest = manifestWithComponents([
+            ExternalComponentDefinition(
+                id: "test-pack.interactive-shell",
+                displayName: "Interactive install",
+                description: "Install with sudo",
+                type: .configuration,
+                dependencies: nil,
+                isRequired: nil,
+                installAction: .shellCommand(command: "sudo make install", interactive: true),
+                doctorChecks: nil
+            ),
+        ])
+        let (adapter, _) = try makeAdapter(manifest: manifest)
+        let component = adapter.components[0]
+        if case let .shellCommand(command, interactive) = component.installAction {
+            #expect(command == "sudo make install")
+            #expect(interactive == true)
         } else {
             Issue.record("Expected .shellCommand action")
         }

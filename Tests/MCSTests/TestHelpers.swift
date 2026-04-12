@@ -69,12 +69,14 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
         let arguments: [String]
         let workingDirectory: String?
         let additionalEnvironment: [String: String]
+        let interactive: Bool
     }
 
     struct ShellCall: Equatable {
         let command: String
         let workingDirectory: String?
         let additionalEnvironment: [String: String]
+        let interactive: Bool
     }
 
     let environment: Environment
@@ -109,13 +111,15 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
         _ executable: String,
         arguments: [String],
         workingDirectory: String?,
-        additionalEnvironment: [String: String]
+        additionalEnvironment: [String: String],
+        interactive: Bool
     ) -> ShellResult {
         runCalls.append(RunCall(
             executable: executable,
             arguments: arguments,
             workingDirectory: workingDirectory,
-            additionalEnvironment: additionalEnvironment
+            additionalEnvironment: additionalEnvironment,
+            interactive: interactive
         ))
         if !runResults.isEmpty {
             return runResults.removeFirst()
@@ -127,12 +131,14 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
     func shell(
         _ command: String,
         workingDirectory: String?,
-        additionalEnvironment: [String: String]
+        additionalEnvironment: [String: String],
+        interactive: Bool
     ) -> ShellResult {
         shellCalls.append(ShellCall(
             command: command,
             workingDirectory: workingDirectory,
-            additionalEnvironment: additionalEnvironment
+            additionalEnvironment: additionalEnvironment,
+            interactive: interactive
         ))
         if !shellResults.isEmpty {
             return shellResults.removeFirst()

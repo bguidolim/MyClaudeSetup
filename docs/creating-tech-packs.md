@@ -136,6 +136,21 @@ Need to depend on Homebrew itself? That's a special case — Homebrew can't inst
         command: brew
 ```
 
+If the install script may need `sudo` (e.g. creating symlinks in `/usr/local/bin`), add `shellInteractive: true` to allocate a real terminal so password prompts work correctly:
+
+```yaml
+  - id: ollama
+    description: Local LLM runtime
+    type: configuration
+    shell: "curl -fsSL https://ollama.com/install.sh | sh"
+    shellInteractive: true
+    doctorChecks:
+      - type: commandExists
+        name: Ollama installed
+        command: ollama
+        args: ["--version"]
+```
+
 ### MCP Servers
 
 Register MCP servers with the Claude CLI:

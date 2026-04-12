@@ -913,6 +913,88 @@ struct GlobalScopeLifecycleTests {
     }
 }
 
+// MARK: - Scenario 5b: Shell Command Component Lifecycle
+
+struct ShellCommandLifecycleTests {
+    @Test("shellCommand component executes during global sync and survives re-sync")
+    func shellCommandGlobalSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // Use a harmless shell command that creates a marker file
+        let markerPath = bed.home.appendingPathComponent("shell-marker.txt").path
+        let pack = MockTechPack(
+            identifier: "shell-pack",
+            displayName: "Shell Pack",
+            components: [
+                ComponentDefinition(
+                    id: "shell-pack.install",
+                    displayName: "Shell install",
+                    description: "Install via shell",
+                    type: .configuration,
+                    packIdentifier: "shell-pack",
+                    dependencies: [],
+                    isRequired: true,
+                    installAction: .shellCommand(command: "touch '\(markerPath)'")
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // === Configure ===
+        let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // Verify the shell command ran
+        #expect(FileManager.default.fileExists(atPath: markerPath))
+
+        // Verify state
+        let state = try ProjectState(stateFile: bed.env.globalStateFile)
+        #expect(state.configuredPacks.contains("shell-pack"))
+
+        // === Re-sync (idempotent) ===
+        try FileManager.default.removeItem(atPath: markerPath)
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // Shell command re-runs (no isAlreadyInstalled skip without doctorChecks)
+        #expect(FileManager.default.fileExists(atPath: markerPath))
+    }
+
+    @Test("shellCommand with interactive flag is accepted and state is recorded")
+    func shellCommandInteractiveAccepted() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let markerPath = bed.home.appendingPathComponent("interactive-marker.txt").path
+        let pack = MockTechPack(
+            identifier: "interactive-pack",
+            displayName: "Interactive Pack",
+            components: [
+                ComponentDefinition(
+                    id: "interactive-pack.install",
+                    displayName: "Interactive install",
+                    description: "Install with interactive flag",
+                    type: .configuration,
+                    packIdentifier: "interactive-pack",
+                    dependencies: [],
+                    isRequired: true,
+                    installAction: .shellCommand(command: "touch '\(markerPath)'", interactive: true)
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // Configure — interactive commands use forkpty() in real ShellRunner,
+        // but the test verifies the component is accepted and state is recorded.
+        let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // Verify state records the pack
+        let state = try ProjectState(stateFile: bed.env.globalStateFile)
+        #expect(state.configuredPacks.contains("interactive-pack"))
+    }
+}
+
 // MARK: - Scenario 6: Stale Artifact Cleanup on Pack Update
 
 struct StaleArtifactCleanupTests {
