@@ -57,20 +57,28 @@ struct Configurator {
         let previousPacks = previousState.configuredPacks
 
         let items = packs.enumerated().map { index, pack in
-            SelectableItem(
+            let installed = previousPacks.contains(pack.identifier)
+            return SelectableItem(
                 number: index + 1,
                 name: pack.displayName,
                 description: pack.description,
-                isSelected: previousPacks.contains(pack.identifier)
+                isSelected: installed,
+                baselineSelected: installed
             )
         }
 
-        let groupTitle = scope.isGlobalScope ? "Tech Packs (Global)" : "Tech Packs"
+        let groupTitle = scope.isGlobalScope
+            ? "Packs to install globally (selected = installed after sync)"
+            : "Packs to install in this project (selected = installed after sync)"
         var groups = [SelectableGroup(
             title: groupTitle,
             items: items,
-            requiredItems: []
+            requiredItems: [],
+            showsDelta: true
         )]
+
+        output.plain("")
+        output.plain("  Selected packs stay or get added. Deselected packs are removed.")
 
         let selectedNumbers = output.multiSelect(groups: &groups)
 
@@ -82,6 +90,24 @@ struct Configurator {
             output.plain("")
             output.info("No packs selected. Nothing to configure.")
             return
+        }
+
+        if !dryRun {
+            let selectedIDs = Set(selectedPacks.map(\.identifier))
+            let summary = SyncDeltaSummary(previous: previousPacks, selected: selectedIDs)
+            if summary.hasRemovals {
+                output.plain("")
+                output.header("Review changes")
+                output.plain(SyncDeltaSummary.renderReviewBlock(summary, style: ANSIStyle(enabled: output.colorsEnabled)))
+                output.plain("")
+                // 'n' during the picker binds to "select none" (CLIOutput.swift interactiveMultiSelect);
+                // a user who hits 'n' thinking it means "cancel" lands on this confirmation with a full
+                // removal summary and default: false — Enter aborts safely.
+                guard output.askYesNo("Apply these changes?", default: false) else {
+                    output.info("Sync cancelled.")
+                    return
+                }
+            }
         }
 
         var excludedComponents: [String: Set<String>] = [:]
@@ -96,7 +122,9 @@ struct Configurator {
         if dryRun {
             try self.dryRun(packs: selectedPacks)
         } else {
-            try configure(packs: selectedPacks, excludedComponents: excludedComponents)
+            // Interactive flow owns the removal confirmation via the "Review changes" screen above,
+            // so suppress the duplicate askYesNo inside configure() (gated by confirmRemovals: true).
+            try configure(packs: selectedPacks, confirmRemovals: false, excludedComponents: excludedComponents)
 
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
