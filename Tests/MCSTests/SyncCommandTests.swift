@@ -231,4 +231,29 @@ struct SyncCommandGuardTests {
         let cmd = try SyncCommand.parse([project.path, "--pack", "foo"])
         #expect(try cmd.guardClaudeHomeCwd(env: env, output: silentOutput()) == false)
     }
+
+    @Test("Guard hard-errors on bare sync from ~/.claude when stdin is non-interactive")
+    func guardHardErrorsOnBareSyncNonInteractive() throws {
+        // Prevents CI/piped-stdin from silently accepting the askYesNo default.
+        let home = try makeClaudeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let cmd = try SyncCommand.parse([env.claudeDirectory.path])
+        #expect(throws: ExitCode.self) {
+            _ = try cmd.guardClaudeHomeCwd(env: env, output: silentOutput())
+        }
+    }
+
+    @Test("Guard hard-errors on --dry-run from ~/.claude (treats dry-run as non-interactive)")
+    func guardHardErrorsOnDryRun() throws {
+        let home = try makeClaudeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let cmd = try SyncCommand.parse([env.claudeDirectory.path, "--dry-run"])
+        #expect(throws: ExitCode.self) {
+            _ = try cmd.guardClaudeHomeCwd(env: env, output: silentOutput())
+        }
+    }
 }

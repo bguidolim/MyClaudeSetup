@@ -182,7 +182,6 @@ struct SyncCommand: LockedCommand {
 
     // MARK: - Shared Helpers
 
-    /// Target URL the sync operates on — explicit `path` arg if given, else cwd.
     private var effectiveTargetURL: URL {
         if let p = path {
             URL(fileURLWithPath: p)
@@ -198,10 +197,13 @@ struct SyncCommand: LockedCommand {
         let target = effectiveTargetURL
         guard env.isInsideClaudeHome(target) else { return global }
 
-        if !global {
-            guard pack.isEmpty, !all else {
+        if global {
+            output.info("Switching cwd to \(env.homeDirectory.path) before global sync.")
+        } else {
+            let isInteractive = pack.isEmpty && !all && !dryRun && output.isInteractiveTerminal
+            guard isInteractive else {
                 output.error("Cannot run 'mcs sync' from \(target.path).")
-                output.plain("  Use 'mcs sync --global' from anywhere instead.")
+                output.plain("  Add '--global' to run global sync, or run from a project directory.")
                 throw ExitCode.failure
             }
             let useGlobal = output.askYesNo(
@@ -209,13 +211,16 @@ struct SyncCommand: LockedCommand {
                 default: true
             )
             guard useGlobal else {
-                output.error("Aborting. Run 'mcs sync --global' from anywhere instead.")
+                output.error("Aborting. Add '--global' to run global sync, or run from a project directory.")
                 throw ExitCode.failure
             }
         }
 
         // Point cwd at $HOME so post-sync ProjectDetector walks don't see stale state.
-        FileManager.default.changeCurrentDirectoryPath(env.homeDirectory.path)
+        guard FileManager.default.changeCurrentDirectoryPath(env.homeDirectory.path) else {
+            output.warn("Could not chdir to \(env.homeDirectory.path); project detection may be stale.")
+            return true
+        }
         return true
     }
 
