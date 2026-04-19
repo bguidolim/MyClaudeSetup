@@ -46,6 +46,8 @@ struct SyncCommand: LockedCommand {
             throw ExitCode.failure
         }
 
+        let effectiveGlobal = try guardClaudeHomeCwd(env: env, output: output)
+
         // First-run: prompt for update notification preference
         let config = promptForUpdateCheckIfNeeded(env: env, output: output)
 
@@ -60,7 +62,7 @@ struct SyncCommand: LockedCommand {
             output: output
         )
 
-        if global {
+        if effectiveGlobal {
             try performGlobal(env: env, output: output, shell: shell, registry: registry)
         } else {
             try performProject(env: env, output: output, shell: shell, registry: registry)
@@ -124,11 +126,7 @@ struct SyncCommand: LockedCommand {
         shell: ShellRunner,
         registry: TechPackRegistry
     ) throws {
-        let projectPath = if let p = path {
-            URL(fileURLWithPath: p)
-        } else {
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        }
+        let projectPath = effectiveTargetURL
 
         guard FileManager.default.fileExists(atPath: projectPath.path) else {
             throw MCSError.fileOperationFailed(
@@ -183,6 +181,43 @@ struct SyncCommand: LockedCommand {
     }
 
     // MARK: - Shared Helpers
+
+    /// Target URL the sync operates on — explicit `path` arg if given, else cwd.
+    private var effectiveTargetURL: URL {
+        if let p = path {
+            URL(fileURLWithPath: p)
+        } else {
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        }
+    }
+
+    /// Detect when the target points at `~/.claude` or `$HOME` and redirect to
+    /// `--global` instead of silently syncing project artifacts into the home dir.
+    /// Returns the effective `global` flag.
+    func guardClaudeHomeCwd(env: Environment, output: CLIOutput) throws -> Bool {
+        let target = effectiveTargetURL
+        guard env.isInsideClaudeHome(target) else { return global }
+
+        if !global {
+            guard pack.isEmpty, !all else {
+                output.error("Cannot run 'mcs sync' from \(target.path).")
+                output.plain("  Use 'mcs sync --global' from anywhere instead.")
+                throw ExitCode.failure
+            }
+            let useGlobal = output.askYesNo(
+                "It looks like you want to sync global scope. Use 'mcs sync --global' instead?",
+                default: true
+            )
+            guard useGlobal else {
+                output.error("Aborting. Run 'mcs sync --global' from anywhere instead.")
+                throw ExitCode.failure
+            }
+        }
+
+        // Point cwd at $HOME so post-sync ProjectDetector walks don't see stale state.
+        FileManager.default.changeCurrentDirectoryPath(env.homeDirectory.path)
+        return true
+    }
 
     /// Prompt for update notification preference on first interactive sync.
     @discardableResult
