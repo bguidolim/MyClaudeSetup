@@ -40,10 +40,12 @@ struct Configurator {
     ///
     /// - Parameter customize: When `true`, present per-pack component multi-select after pack selection.
     func interactiveConfigure(dryRun: Bool = false, customize: Bool = false) throws {
-        // The picker and confirmation require a TTY. Without it, piped/closed stdin
-        // silently returns the default (false on confirm), which would look like a
-        // successful sync but apply nothing. Fail loudly and point at non-interactive flags.
-        guard output.isInteractiveTerminal else {
+        // Piped/closed stdin means the confirmation prompt silently returns its default,
+        // which would look like a successful sync while applying nothing. Fail loudly
+        // and point at non-interactive flags. Note: `hasInteractiveStdin` (not
+        // `isInteractiveTerminal`) — piped stdout with TTY stdin is still a valid
+        // flow that drops into the fallback picker/prompt.
+        guard output.hasInteractiveStdin else {
             output.error("Interactive sync requires a terminal.")
             output.plain("  Use --pack <name> (repeatable) or --all for non-interactive sync.")
             throw ExitCode.failure

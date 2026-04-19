@@ -3,6 +3,11 @@ import Foundation
 /// Terminal output with ANSI color support and structured logging.
 struct CLIOutput {
     let colorsEnabled: Bool
+    /// True when stdin is a TTY — i.e. the user can answer prompts (raw or fallback).
+    /// Gate interactive-confirmation flows on this, not on `isInteractiveTerminal`.
+    let hasInteractiveStdin: Bool
+    /// True when both stdin and stdout are TTYs — the raw-terminal UI (cursor
+    /// manipulation, ANSI ornamentation) can render. Gate pickers on this.
     let isInteractiveTerminal: Bool
     let style: ANSIStyle
 
@@ -12,7 +17,8 @@ struct CLIOutput {
         } else {
             self.colorsEnabled = isatty(STDOUT_FILENO) != 0
         }
-        isInteractiveTerminal = self.colorsEnabled && isatty(STDIN_FILENO) != 0
+        hasInteractiveStdin = isatty(STDIN_FILENO) != 0
+        isInteractiveTerminal = hasInteractiveStdin && isatty(STDOUT_FILENO) != 0
         style = ANSIStyle(enabled: self.colorsEnabled)
     }
 
@@ -545,8 +551,7 @@ struct CLIOutput {
                     switch state {
                     case .newInstall: additions += 1
                     case .installedRemoved: removals += 1
-                    case .installedKept: unchanged += 1
-                    case .notInstalled: break
+                    case .installedKept, .notInstalled: unchanged += 1
                     }
                 }
                 if isCursor, group.showsDelta {
