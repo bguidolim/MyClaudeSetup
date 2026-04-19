@@ -142,6 +142,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PackUpdater.swift` — shared fetch → validate → trust cycle for updating a single git pack (used by `UpdatePack` and `LockfileOperations`)
 - `ResourceRefCounter.swift` — two-tier reference counting (global artifacts + project index manifests) for safe brew/plugin removal
 - `LockfileOperations.swift` — reads/writes `mcs.lock.yaml`, checks out locked versions, updates lockfile
+- `SyncDeltaSummary.swift` — computes add/remove/keep deltas between previous and selected pack sets and renders the review-changes summary shown before destructive sync operations
 
 ### Templates (`Sources/mcs/Templates/`)
 - `TemplateEngine.swift` — `__PLACEHOLDER__` substitution
