@@ -137,14 +137,11 @@ struct LockfileOperations {
         guard !configuredIDs.isEmpty else { return }
 
         if let existing = try Lockfile.load(projectRoot: projectPath) {
-            let mismatches = existing.detectMismatches(registryEntries: registryData.packs)
-            for mismatch in mismatches {
-                if let currentSHA = mismatch.currentSHA {
-                    let current = String(currentSHA.prefix(7))
-                    let expected = String(mismatch.lockedSHA.prefix(7))
-                    output.warn("Pack '\(mismatch.identifier)' is at \(current) but lockfile expected \(expected).")
-                }
-            }
+            emitDriftWarnings(
+                existing: existing,
+                registryEntries: registryData.packs,
+                includeMigrationHint: false
+            )
         }
 
         let lockfile = Lockfile.generate(
@@ -153,5 +150,41 @@ struct LockfileOperations {
         )
         try lockfile.save(projectRoot: projectPath)
         output.success("Updated mcs.lock.yaml")
+    }
+
+    /// Report drift between the on-disk lockfile and the current registry state without writing.
+    /// Called on the upgrade path — user has never configured `generate-lockfile` and a stale
+    /// lockfile from the auto-generation era is still on disk. Always appends the migration hint.
+    /// No-op if the lockfile is absent.
+    func reportDrift(at projectPath: URL) throws {
+        guard let existing = try Lockfile.load(projectRoot: projectPath) else { return }
+        let registryFile = PackRegistryFile(path: environment.packsRegistry)
+        let registryData = try registryFile.load()
+        emitDriftWarnings(
+            existing: existing,
+            registryEntries: registryData.packs,
+            includeMigrationHint: true
+        )
+    }
+
+    private func emitDriftWarnings(
+        existing: Lockfile,
+        registryEntries: [PackRegistryFile.PackEntry],
+        includeMigrationHint: Bool
+    ) {
+        let mismatches = existing.detectMismatches(registryEntries: registryEntries)
+        var drifted = false
+        for mismatch in mismatches {
+            if let currentSHA = mismatch.currentSHA {
+                let current = String(currentSHA.prefix(7))
+                let expected = String(mismatch.lockedSHA.prefix(7))
+                output.warn("Pack '\(mismatch.identifier)' is at \(current) but lockfile expected \(expected).")
+                drifted = true
+            }
+        }
+        if drifted, includeMigrationHint {
+            output.plain("  Run 'mcs config set generate-lockfile true' to resume auto-updating,")
+            output.plain("  or delete mcs.lock.yaml to opt out.")
+        }
     }
 }

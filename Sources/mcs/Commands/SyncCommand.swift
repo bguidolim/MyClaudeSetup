@@ -65,7 +65,7 @@ struct SyncCommand: LockedCommand {
         if effectiveGlobal {
             try performGlobal(env: env, output: output, shell: shell, registry: registry)
         } else {
-            try performProject(env: env, output: output, shell: shell, registry: registry)
+            try performProject(env: env, output: output, shell: shell, registry: registry, config: config)
         }
 
         if !dryRun {
@@ -124,7 +124,8 @@ struct SyncCommand: LockedCommand {
         env: Environment,
         output: CLIOutput,
         shell: ShellRunner,
-        registry: TechPackRegistry
+        registry: TechPackRegistry,
+        config: MCSConfig
     ) throws {
         let projectPath = effectiveTargetURL
 
@@ -174,10 +175,31 @@ struct SyncCommand: LockedCommand {
             try configurator.interactiveConfigure(dryRun: dryRun, customize: customize)
         }
 
-        // Write lockfile after successful sync (unless dry-run)
-        if !dryRun {
+        switch Self.lockfileAction(dryRun: dryRun, update: update, config: config) {
+        case .write:
             try lockOps.writeLockfile(at: projectPath)
+        case .reportDrift:
+            try lockOps.reportDrift(at: projectPath)
+        case .skip:
+            break
         }
+    }
+
+    /// Lockfile action at the end of a project sync.
+    /// Explicit opt-out (`generate-lockfile: false`) stays silent — the user has made a choice
+    /// and drift warnings would half-respect it. Only the never-configured (`nil`) state gets a
+    /// drift nudge, since those users likely have a stale lockfile from the auto-generation era.
+    enum LockfileAction: Equatable {
+        case write
+        case reportDrift
+        case skip
+    }
+
+    static func lockfileAction(dryRun: Bool, update: Bool, config: MCSConfig) -> LockfileAction {
+        guard !dryRun else { return .skip }
+        if update || config.isLockfileGenerationEnabled { return .write }
+        if config.isLockfileGenerationUnset { return .reportDrift }
+        return .skip
     }
 
     // MARK: - Shared Helpers
