@@ -165,6 +165,41 @@ struct MCSConfigTests {
         #expect(!config.isTelemetryEnabled)
     }
 
+    @Test("isLockfileGenerationEnabled defaults to false when nil")
+    func isLockfileGenerationEnabledNil() {
+        let config = MCSConfig()
+        #expect(!config.isLockfileGenerationEnabled)
+    }
+
+    @Test("isLockfileGenerationEnabled returns true when explicitly true")
+    func isLockfileGenerationEnabledTrue() {
+        var config = MCSConfig()
+        config.generateLockfile = true
+        #expect(config.isLockfileGenerationEnabled)
+    }
+
+    @Test("isLockfileGenerationEnabled returns false when explicitly false")
+    func isLockfileGenerationEnabledFalse() {
+        var config = MCSConfig()
+        config.generateLockfile = false
+        #expect(!config.isLockfileGenerationEnabled)
+    }
+
+    @Test("generate-lockfile key round-trips through save/load")
+    func lockfileKeyRoundtrip() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        var config = MCSConfig()
+        config.generateLockfile = true
+        try config.save(to: path)
+
+        let reloaded = MCSConfig.load(from: path)
+        #expect(reloaded.generateLockfile == true)
+        #expect(reloaded.isLockfileGenerationEnabled)
+    }
+
     // MARK: - Key Access
 
     @Test("value(forKey:) returns correct values")
@@ -173,10 +208,12 @@ struct MCSConfigTests {
         config.updateCheckPacks = true
         config.updateCheckCLI = false
         config.telemetry = true
+        config.generateLockfile = true
 
         #expect(config.value(forKey: "update-check-packs") == true)
         #expect(config.value(forKey: "update-check-cli") == false)
         #expect(config.value(forKey: "telemetry") == true)
+        #expect(config.value(forKey: "generate-lockfile") == true)
         #expect(config.value(forKey: "unknown-key") == nil)
     }
 
@@ -195,6 +232,10 @@ struct MCSConfigTests {
         let telemetrySet = config.setValue(false, forKey: "telemetry")
         #expect(telemetrySet)
         #expect(config.telemetry == false)
+
+        let lockfileSet = config.setValue(true, forKey: "generate-lockfile")
+        #expect(lockfileSet)
+        #expect(config.generateLockfile == true)
 
         let unknownSet = config.setValue(true, forKey: "unknown-key")
         #expect(!unknownSet)

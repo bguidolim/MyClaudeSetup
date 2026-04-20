@@ -65,7 +65,7 @@ struct SyncCommand: LockedCommand {
         if effectiveGlobal {
             try performGlobal(env: env, output: output, shell: shell, registry: registry)
         } else {
-            try performProject(env: env, output: output, shell: shell, registry: registry)
+            try performProject(env: env, output: output, shell: shell, registry: registry, config: config)
         }
 
         if !dryRun {
@@ -124,7 +124,8 @@ struct SyncCommand: LockedCommand {
         env: Environment,
         output: CLIOutput,
         shell: ShellRunner,
-        registry: TechPackRegistry
+        registry: TechPackRegistry,
+        config: MCSConfig
     ) throws {
         let projectPath = effectiveTargetURL
 
@@ -174,9 +175,17 @@ struct SyncCommand: LockedCommand {
             try configurator.interactiveConfigure(dryRun: dryRun, customize: customize)
         }
 
-        // Write lockfile after successful sync (unless dry-run)
+        // Lockfile handling: write when --update or config opts in; otherwise surface drift
+        // on any pre-existing lockfile so opted-in teams still see SHA divergence.
         if !dryRun {
-            try lockOps.writeLockfile(at: projectPath)
+            if update || config.isLockfileGenerationEnabled {
+                try lockOps.writeLockfile(at: projectPath)
+            } else {
+                try lockOps.reportDrift(
+                    at: projectPath,
+                    includeMigrationHint: config.isLockfileGenerationUnset
+                )
+            }
         }
     }
 

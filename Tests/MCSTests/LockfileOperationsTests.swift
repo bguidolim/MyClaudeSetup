@@ -142,6 +142,90 @@ struct LockfileOperationsTests {
         #expect(lockfile?.packs[0].commitSHA == "newsha")
     }
 
+    // MARK: - reportDrift
+
+    @Test("reportDrift is a no-op when lockfile is absent")
+    func reportDriftNoLockfile() throws {
+        let home = try makeTmpDir()
+        let project = try makeTmpDir()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        try writeRegistry([], home: home)
+
+        let ops = makeOperations(home: home)
+        // No throw, no file created
+        try ops.reportDrift(at: project)
+
+        let lockfilePath = project.appendingPathComponent(Lockfile.filename)
+        #expect(!FileManager.default.fileExists(atPath: lockfilePath.path))
+    }
+
+    @Test("reportDrift does not modify the lockfile when SHAs drift")
+    func reportDriftLeavesLockfileUnchanged() throws {
+        let home = try makeTmpDir()
+        let project = try makeTmpDir()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        // Pin lockfile to oldsha; point registry at newsha (drift).
+        let pinned = Lockfile(
+            lockVersion: 1,
+            generatedAt: "pinned-time",
+            mcsVersion: "test",
+            packs: [.init(identifier: "ios", sourceURL: "https://example.com/ios.git", commitSHA: "oldsha00")]
+        )
+        try pinned.save(projectRoot: project)
+        let lockfilePath = project.appendingPathComponent(Lockfile.filename)
+        let before = try Data(contentsOf: lockfilePath)
+
+        try writeRegistry(
+            [makeRegistryEntry(identifier: "ios", commitSHA: "newsha00")],
+            home: home
+        )
+
+        let ops = makeOperations(home: home)
+        try ops.reportDrift(at: project, includeMigrationHint: true)
+
+        let after = try Data(contentsOf: lockfilePath)
+        #expect(before == after, "reportDrift must not rewrite the lockfile")
+    }
+
+    @Test("reportDrift is a no-op when registry matches lockfile")
+    func reportDriftMatchingSHAs() throws {
+        let home = try makeTmpDir()
+        let project = try makeTmpDir()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let pinned = Lockfile(
+            lockVersion: 1,
+            generatedAt: "pinned-time",
+            mcsVersion: "test",
+            packs: [.init(identifier: "ios", sourceURL: "https://example.com/ios.git", commitSHA: "aabbccdd")]
+        )
+        try pinned.save(projectRoot: project)
+        let lockfilePath = project.appendingPathComponent(Lockfile.filename)
+        let before = try Data(contentsOf: lockfilePath)
+
+        try writeRegistry(
+            [makeRegistryEntry(identifier: "ios", commitSHA: "aabbccdd")],
+            home: home
+        )
+
+        let ops = makeOperations(home: home)
+        try ops.reportDrift(at: project, includeMigrationHint: false)
+
+        let after = try Data(contentsOf: lockfilePath)
+        #expect(before == after)
+    }
+
     // MARK: - checkoutLockedCommits: Missing lockfile
 
     @Test("checkoutLockedCommits throws when no lockfile exists")
