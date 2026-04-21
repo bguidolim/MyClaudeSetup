@@ -605,6 +605,254 @@ struct ScannerExtensionTests {
     }
 }
 
+// MARK: - partitionDeclaredPrompts
+
+struct PartitionDeclaredPromptsTests {
+    @Test("partition: input prompt with prior becomes reusable")
+    func partitionInputPriorReusable() {
+        let prompt = PromptDefinition(
+            key: "BRANCH_PREFIX", type: .input,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["BRANCH_PREFIX": "bruno"]
+        )
+        #expect(reusable == ["BRANCH_PREFIX": "bruno"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: input prompt without prior becomes newDeclared")
+    func partitionInputMissingPriorIsNew() {
+        let prompt = PromptDefinition(
+            key: "NEW_KEY", type: .input,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: [:]
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["NEW_KEY"])
+    }
+
+    @Test("partition: select prompt with valid prior is reusable")
+    func partitionSelectValidPriorReusable() {
+        let prompt = PromptDefinition(
+            key: "LOG_LEVEL", type: .select,
+            label: nil, defaultValue: nil,
+            options: [
+                PromptOption(value: "info", label: "Info"),
+                PromptOption(value: "debug", label: "Debug"),
+            ],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["LOG_LEVEL": "debug"]
+        )
+        #expect(reusable == ["LOG_LEVEL": "debug"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: select prompt with invalidated prior becomes newDeclared")
+    func partitionSelectInvalidatedPriorIsNew() {
+        let prompt = PromptDefinition(
+            key: "LOG_LEVEL", type: .select,
+            label: nil, defaultValue: nil,
+            options: [
+                PromptOption(value: "info", label: "Info"),
+                PromptOption(value: "debug", label: "Debug"),
+            ],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["LOG_LEVEL": "trace-removed"]
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["LOG_LEVEL"])
+    }
+
+    @Test("partition: select with valid option from any declaring pack is reusable")
+    func partitionSelectAcrossPacksMergedOptions() {
+        let fromPackA = PromptDefinition(
+            key: "REGION", type: .select,
+            label: nil, defaultValue: nil,
+            options: [PromptOption(value: "us", label: "US")],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let fromPackB = PromptDefinition(
+            key: "REGION", type: .select,
+            label: nil, defaultValue: nil,
+            options: [PromptOption(value: "eu", label: "EU")],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [fromPackA, fromPackB], priorValues: ["REGION": "eu"]
+        )
+        #expect(reusable == ["REGION": "eu"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: select with nil options treats any prior as reusable (matches executor fallback)")
+    func partitionSelectNilOptionsReusable() {
+        let prompt = PromptDefinition(
+            key: "FREEFORM", type: .select,
+            label: nil, defaultValue: nil,
+            options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["FREEFORM": "anything"]
+        )
+        #expect(reusable == ["FREEFORM": "anything"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: select with empty options array treats any prior as reusable")
+    func partitionSelectEmptyOptionsReusable() {
+        let prompt = PromptDefinition(
+            key: "FREEFORM", type: .select,
+            label: nil, defaultValue: nil,
+            options: [],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, _) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["FREEFORM": "anything"]
+        )
+        #expect(reusable == ["FREEFORM": "anything"])
+    }
+
+    @Test("partition: mixed constrained + unconstrained — prior outside constraints is not reusable")
+    func partitionMixedConstrainedRejectsOutOfConstraint() {
+        // Pack A restricts REGION to [us]; pack B declares REGION select with nil options.
+        // The shared resolver would present [us] to the user, so a prior of "zz" must be re-asked.
+        let constrained = PromptDefinition(
+            key: "REGION", type: .select,
+            label: nil, defaultValue: nil,
+            options: [PromptOption(value: "us", label: "US")],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let unconstrained = PromptDefinition(
+            key: "REGION", type: .select,
+            label: nil, defaultValue: nil,
+            options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [constrained, unconstrained], priorValues: ["REGION": "zz"]
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["REGION"])
+    }
+
+    @Test("partition: mixed constrained + unconstrained — prior inside constraints is reusable")
+    func partitionMixedConstrainedAcceptsValidValue() {
+        let constrained = PromptDefinition(
+            key: "REGION", type: .select,
+            label: nil, defaultValue: nil,
+            options: [PromptOption(value: "us", label: "US")],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let unconstrained = PromptDefinition(
+            key: "REGION", type: .select,
+            label: nil, defaultValue: nil,
+            options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, _) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [constrained, unconstrained], priorValues: ["REGION": "us"]
+        )
+        #expect(reusable == ["REGION": "us"])
+    }
+
+    @Test("collectDeclaredPrompts preserves duplicate-key declarations across packs")
+    func collectPreservesPerPackDeclarations() {
+        let packA = PromptMockPack(
+            identifier: "pack-a", displayName: "A",
+            prompts: [PromptDefinition(
+                key: "REGION", type: .select,
+                label: nil, defaultValue: nil,
+                options: [PromptOption(value: "us", label: "US")],
+                detectPatterns: nil, scriptCommand: nil
+            )]
+        )
+        let packB = PromptMockPack(
+            identifier: "pack-b", displayName: "B",
+            prompts: [PromptDefinition(
+                key: "REGION", type: .select,
+                label: nil, defaultValue: nil,
+                options: [PromptOption(value: "eu", label: "EU")],
+                detectPatterns: nil, scriptCommand: nil
+            )]
+        )
+        let context = ProjectConfigContext(
+            projectPath: URL(fileURLWithPath: "/tmp"),
+            repoName: "",
+            output: CLIOutput(colorsEnabled: false)
+        )
+
+        let collected = CrossPackPromptResolver.collectDeclaredPrompts(
+            packs: [packA, packB], context: context
+        )
+        #expect(collected.count == 2)
+
+        // Downstream partition sees both declarations → "eu" from pack B validates.
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            collected, priorValues: ["REGION": "eu"]
+        )
+        #expect(reusable == ["REGION": "eu"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: script prompt is neither reusable nor newDeclared")
+    func partitionScriptExcluded() {
+        let prompt = PromptDefinition(
+            key: "VERSION", type: .script,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: "echo 1.0"
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["VERSION": "0.9"]
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: fileDetect prompt is neither reusable nor newDeclared")
+    func partitionFileDetectExcluded() {
+        let prompt = PromptDefinition(
+            key: "PROJECT", type: .fileDetect,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: ["*.xcodeproj"], scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [prompt], priorValues: ["PROJECT": "App.xcodeproj"]
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: type conflict falls back to input reuse semantics")
+    func partitionTypeConflictFallsBackToInput() {
+        let asInput = PromptDefinition(
+            key: "SHARED", type: .input,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let asSelect = PromptDefinition(
+            key: "SHARED", type: .select,
+            label: nil, defaultValue: nil,
+            options: [PromptOption(value: "a", label: "A")],
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [asInput, asSelect], priorValues: ["SHARED": "anything"]
+        )
+        #expect(reusable == ["SHARED": "anything"])
+        #expect(newKeys.isEmpty)
+    }
+}
+
 // MARK: - PromptMockPack
 
 /// A mock TechPack that supports declaredPrompts for testing cross-pack dedup.

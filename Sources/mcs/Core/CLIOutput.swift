@@ -289,8 +289,21 @@ struct CLIOutput {
     }
 
     /// Inline text prompt where the user types on the same line as the label.
-    func promptInline(_ prompt: String, default defaultValue: String? = nil) -> String {
-        let hint = defaultValue.map { " (\($0))" } ?? ""
+    ///
+    /// - Parameter maskDefault: When `true`, the hint shows a generic
+    ///   `(press Enter to keep existing value)` placeholder instead of the raw default.
+    ///   Use for defaults that originate from previously-entered user input, which may
+    ///   be sensitive (API keys, tokens). Pack-declared defaults remain visible.
+    func promptInline(
+        _ prompt: String,
+        default defaultValue: String? = nil,
+        maskDefault: Bool = false
+    ) -> String {
+        let hint: String = if let defaultValue {
+            maskDefault ? " (press Enter to keep existing value)" : " (\(defaultValue))"
+        } else {
+            ""
+        }
         write("  \(bold)\(prompt)\(reset)\(hint): ")
         let answer = readLine()?.trimmingCharacters(in: .whitespaces) ?? ""
         if answer.isEmpty, let defaultValue {
@@ -314,21 +327,30 @@ struct CLIOutput {
     /// Single-select: arrow keys to navigate, Enter to confirm.
     /// Returns the index of the selected item.
     /// Falls back to numbered list with readLine() when not a TTY.
-    func singleSelect(title: String, items: [(name: String, description: String)]) -> Int {
+    ///
+    /// - Parameter initialIndex: Pre-selected cursor position (clamped to `0..<items.count`).
+    ///   Used to seed the selection with a previously-stored value.
+    func singleSelect(
+        title: String,
+        items: [(name: String, description: String)],
+        initialIndex: Int = 0
+    ) -> Int {
         guard !items.isEmpty else { return 0 }
+        let seed = max(0, min(initialIndex, items.count - 1))
 
         if isInteractiveTerminal {
-            return interactiveSingleSelect(title: title, items: items)
+            return interactiveSingleSelect(title: title, items: items, initialIndex: seed)
         }
-        return fallbackSingleSelect(title: title, items: items)
+        return fallbackSingleSelect(title: title, items: items, initialIndex: seed)
     }
 
     private func interactiveSingleSelect(
         title: String,
-        items: [(name: String, description: String)]
+        items: [(name: String, description: String)],
+        initialIndex: Int
     ) -> Int {
         withRawTerminal {
-            var cursor = 0
+            var cursor = initialIndex
 
             renderSingleSelectList(title: title, items: items, cursor: cursor)
 
@@ -414,7 +436,8 @@ struct CLIOutput {
 
     private func fallbackSingleSelect(
         title: String,
-        items: [(name: String, description: String)]
+        items: [(name: String, description: String)],
+        initialIndex: Int
     ) -> Int {
         write("\n")
         write("  \(bold)\(title)\(reset)\n")
@@ -423,7 +446,8 @@ struct CLIOutput {
         for (index, item) in items.enumerated() {
             if index > 0 { write("\n") }
             let num = index + 1
-            write("  [\(num)] \(bold)\(item.name)\(reset)\n")
+            let marker = index == initialIndex ? " (default)" : ""
+            write("  [\(num)] \(bold)\(item.name)\(reset)\(marker)\n")
             write("      \(dim)\(item.description)\(reset)\n")
         }
 
@@ -432,7 +456,10 @@ struct CLIOutput {
         while true {
             write("\(bold)> \(reset)")
             guard let input = readLine()?.trimmingCharacters(in: .whitespaces) else {
-                return 0
+                return initialIndex
+            }
+            if input.isEmpty {
+                return initialIndex
             }
             if let num = Int(input), num >= 1, num <= items.count {
                 return num - 1
