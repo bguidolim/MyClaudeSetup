@@ -174,11 +174,13 @@ struct PromptExecutor {
     // MARK: - Input
 
     /// Free-text prompt with optional default value.
-    /// `priorValue` (stored from a previous sync) wins over `prompt.defaultValue` as the Enter-to-accept default.
+    /// `priorValue` (stored from a previous sync) wins over `prompt.defaultValue` as the
+    /// Enter-to-accept default. Prior values are masked in the prompt hint — pack-declared
+    /// defaults are authored publicly and remain visible.
     private func executeInput(prompt: PromptDefinition, priorValue: String?) -> String {
         let label = prompt.label ?? "Enter value for \(prompt.key)"
         let effectiveDefault = priorValue ?? prompt.defaultValue
-        return output.promptInline(label, default: effectiveDefault)
+        return output.promptInline(label, default: effectiveDefault, maskDefault: priorValue != nil)
     }
 
     // MARK: - Select

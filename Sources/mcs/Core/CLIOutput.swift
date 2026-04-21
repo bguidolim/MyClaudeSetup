@@ -289,8 +289,21 @@ struct CLIOutput {
     }
 
     /// Inline text prompt where the user types on the same line as the label.
-    func promptInline(_ prompt: String, default defaultValue: String? = nil) -> String {
-        let hint = defaultValue.map { " (\($0))" } ?? ""
+    ///
+    /// - Parameter maskDefault: When `true`, the hint shows a generic
+    ///   `(press Enter to keep existing value)` placeholder instead of the raw default.
+    ///   Use for defaults that originate from previously-entered user input, which may
+    ///   be sensitive (API keys, tokens). Pack-declared defaults remain visible.
+    func promptInline(
+        _ prompt: String,
+        default defaultValue: String? = nil,
+        maskDefault: Bool = false
+    ) -> String {
+        let hint: String = if let defaultValue {
+            maskDefault ? " (press Enter to keep existing value)" : " (\(defaultValue))"
+        } else {
+            ""
+        }
         write("  \(bold)\(prompt)\(reset)\(hint): ")
         let answer = readLine()?.trimmingCharacters(in: .whitespaces) ?? ""
         if answer.isEmpty, let defaultValue {

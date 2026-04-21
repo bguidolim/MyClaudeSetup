@@ -163,9 +163,14 @@ enum CrossPackPromptResolver {
                 let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
                 resolved[key] = mergedOptions[selected].value
             } else {
-                // Default to text input; prior value seeds the Enter-to-accept default
+                // Default to text input; prior value seeds the Enter-to-accept default.
+                // Mask the hint when the default came from a prior (may hold secrets).
                 let effectiveDefault = prior ?? declaredDefault
-                let value = output.promptInline("  Enter value for \(key)", default: effectiveDefault)
+                let value = output.promptInline(
+                    "  Enter value for \(key)",
+                    default: effectiveDefault,
+                    maskDefault: prior != nil
+                )
                 resolved[key] = value
             }
         }

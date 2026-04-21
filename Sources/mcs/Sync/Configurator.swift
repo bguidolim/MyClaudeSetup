@@ -232,6 +232,11 @@ struct Configurator {
             }
         }
 
+        // Snapshot prior values before resolveAllValues overwrites them via
+        // state.setResolvedValues — used later by the configureProject hook so
+        // packs can diff prior vs current during migrations.
+        let priorResolvedValues = state.resolvedValues ?? [:]
+
         // 3–4b. Resolve all template/placeholder values upfront (single pass)
         let allValues = try resolveAllValues(packs: packs, state: &state, customize: customize)
 
@@ -288,7 +293,7 @@ struct Configurator {
             let hookContext = strategy.makeConfigContext(
                 output: output,
                 resolvedValues: allValues,
-                priorValues: [:]
+                priorValues: priorResolvedValues
             )
             let projectPath = scope.targetPath.deletingLastPathComponent()
             for pack in packs {
@@ -660,7 +665,12 @@ struct Configurator {
                 allValues[key] = prior
                 continue
             }
-            allValues[key] = output.promptInline("Set value for \(key)", default: priorValues[key])
+            let prior = priorValues[key]
+            allValues[key] = output.promptInline(
+                "Set value for \(key)",
+                default: prior,
+                maskDefault: prior != nil
+            )
         }
 
         state.setResolvedValues(allValues)
