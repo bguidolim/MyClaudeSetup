@@ -498,8 +498,17 @@ struct Configurator {
     /// federated cleanup prune orphans — a later pack declaring the same key is asked fresh instead
     /// of seeing a stale "prior" from a removed pack.
     private func pruneOrphanResolvedValues(state: inout ProjectState) {
+        var survivingPacks: [any TechPack] = []
+        for packID in state.configuredPacks {
+            guard let pack = registry.pack(for: packID) else {
+                // Conservative fallback matching ResourceRefCounter: if any configured pack
+                // can't be loaded from the registry, we can't enumerate its declared keys,
+                // so skip pruning rather than risk dropping values that still belong.
+                return
+            }
+            survivingPacks.append(pack)
+        }
         let priors = state.resolvedValues ?? [:]
-        let survivingPacks = state.configuredPacks.compactMap { registry.pack(for: $0) }
         let context = strategy.makeConfigContext(
             output: output, resolvedValues: priors, priorValues: priors
         )

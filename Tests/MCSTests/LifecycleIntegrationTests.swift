@@ -1606,7 +1606,6 @@ struct PromptValueReuseLifecycleTests {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        // First sync: pack A declares BRANCH_PREFIX
         let packA = MockPromptTechPack(
             identifier: "pack-a",
             displayName: "Pack A",
@@ -1616,7 +1615,6 @@ struct PromptValueReuseLifecycleTests {
         try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA]))
             .configure(packs: [packA], confirmRemovals: false)
 
-        // Seed the user's custom answer
         var state = try bed.projectState()
         state.setResolvedValues(["BRANCH_PREFIX": "bruno"])
         try state.save()
@@ -1630,7 +1628,6 @@ struct PromptValueReuseLifecycleTests {
         let afterRemoval = try bed.projectState()
         #expect(afterRemoval.resolvedValues?["BRANCH_PREFIX"] == nil)
 
-        // Pack B (different identifier) declares the same key with a different default.
         let packB = MockPromptTechPack(
             identifier: "pack-b",
             displayName: "Pack B",
@@ -1670,12 +1667,51 @@ struct PromptValueReuseLifecycleTests {
         state.setResolvedValues(["BRANCH_PREFIX": "bruno"])
         try state.save()
 
-        // Remove pack A; pack B still declares BRANCH_PREFIX so the value must survive.
+        // Pack B still declares BRANCH_PREFIX, so the value must survive removal of A.
         try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
             .configure(packs: [packB], confirmRemovals: false)
 
         let final = try bed.projectState()
         #expect(final.resolvedValues?["BRANCH_PREFIX"] == "bruno")
+    }
+
+    @Test("Pruning skips when a configured survivor pack is missing from the registry")
+    func pruningSkippedWhenSurvivorUnresolvable() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let packA = MockPromptTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            prompts: [inputPrompt("KEY_A")],
+            defaultAnswer: { "a-\($0)" }
+        )
+        let packB = MockPromptTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            prompts: [inputPrompt("KEY_B")],
+            defaultAnswer: { "b-\($0)" }
+        )
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
+            .configure(packs: [packA, packB], confirmRemovals: false)
+
+        var state = try bed.projectState()
+        state.setResolvedValues(["KEY_A": "user-a", "KEY_B": "user-b"])
+        try state.save()
+
+        // Direct unconfigure with a registry that omits pack-a simulates pack-a's
+        // directory being manually removed from ~/.mcs/packs/ — pack-a stays in
+        // state.configuredPacks but can no longer be resolved. The prune helper
+        // must refuse to run rather than silently drop keys that still belong.
+        state = try bed.projectState()
+        let narrowConfigurator = bed.makeConfigurator(
+            registry: TechPackRegistry(packs: [packB])
+        )
+        narrowConfigurator.unconfigurePack("pack-b", state: &state)
+        try state.save()
+
+        let final = try bed.projectState()
+        #expect(final.resolvedValues?["KEY_A"] == "user-a")
     }
 
     @Test("--customize forces re-ask even when priors are available")
