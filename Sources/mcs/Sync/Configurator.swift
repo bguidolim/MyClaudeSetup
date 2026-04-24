@@ -331,6 +331,7 @@ struct Configurator {
         guard let artifacts = state.artifacts(for: packID) else {
             output.dimmed("No artifact record for \(packID) — skipping")
             state.removePack(packID)
+            pruneOrphanResolvedValues(state: &state)
             return
         }
 
@@ -489,6 +490,32 @@ struct Configurator {
             state.setArtifacts(remaining, for: packID)
             output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(scope.syncHint)' to retry.")
         }
+        pruneOrphanResolvedValues(state: &state)
+    }
+
+    /// Drop `state.resolvedValues` entries whose keys are not declared by any currently-configured pack.
+    /// Invoked at the tail of `unconfigurePack` so both `mcs sync` deselection and `mcs pack remove`
+    /// federated cleanup prune orphans — a later pack declaring the same key is asked fresh instead
+    /// of seeing a stale "prior" from a removed pack.
+    private func pruneOrphanResolvedValues(state: inout ProjectState) {
+        var survivingPacks: [any TechPack] = []
+        for packID in state.configuredPacks {
+            guard let pack = registry.pack(for: packID) else {
+                // Conservative fallback matching ResourceRefCounter: if any configured pack
+                // can't be loaded from the registry, we can't enumerate its declared keys,
+                // so skip pruning rather than risk dropping values that still belong.
+                return
+            }
+            survivingPacks.append(pack)
+        }
+        let priors = state.resolvedValues ?? [:]
+        let context = strategy.makeConfigContext(
+            output: output, resolvedValues: priors, priorValues: priors
+        )
+        let declared = CrossPackPromptResolver.collectDeclaredPrompts(
+            packs: survivingPacks, context: context
+        )
+        state.pruneResolvedValues(keepingKeys: Set(declared.lazy.map(\.key)))
     }
 
     /// Remove artifacts for components that were previously included but are now excluded.
