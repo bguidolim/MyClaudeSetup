@@ -115,8 +115,10 @@ struct UpdateScopeResolver {
         let pruned = indexFile.pruneStale(in: &indexData)
         guard !pruned.isEmpty else { return }
 
-        output.dimmed("Pruned \(pruned.count) stale project entries from index.")
-        if !dryRun {
+        if dryRun {
+            output.dimmed("Would prune \(pruned.count) stale project entries from index (dry-run; pruned in memory only).")
+        } else {
+            output.dimmed("Pruned \(pruned.count) stale project entries from index.")
             try indexFile.save(indexData)
         }
     }
