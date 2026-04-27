@@ -311,49 +311,53 @@ struct UpdateChecker {
         let gitEntries = entries.filter { !$0.isLocalPack }
         guard !gitEntries.isEmpty else { return [] }
 
-        // Each index is written by exactly one iteration — no data race.
-        // nonisolated(unsafe) is needed because concurrentPerform's closure is @Sendable.
-        nonisolated(unsafe) var results = [PackCheckOutcome?](repeating: nil, count: gitEntries.count)
-
-        DispatchQueue.concurrentPerform(iterations: gitEntries.count) { index in
-            let entry = gitEntries[index]
-            // Refs are user-controllable via `mcs pack add --ref` and persisted in `registry.yaml`;
-            // a corrupted ref starting with `-` would be interpreted as a git option (argument
-            // injection). Skip the pack — registry corruption is permanent (unlike a transient
-            // ls-remote failure), so emit to MCS_DEBUG so the silent skip is at least visible
-            // during development. Production hooks stay quiet per the "non-intrusive" design.
-            if let ref = entry.ref, !isValidGitRef(ref) {
-                if Environment.isDebugMode {
-                    let message = "mcs: skipping update check for '\(entry.identifier)': invalid ref '\(ref)'\n"
-                    FileHandle.standardError.write(Data(message.utf8))
+        // Each index is written by exactly one iteration. We write through a raw buffer pointer
+        // rather than the `Array` subscript so the parallel writes touch only distinct element
+        // addresses — no Array COW header / refcount machinery in the hot path. The `nonisolated(unsafe)`
+        // capture is still needed because `UnsafeMutableBufferPointer` is not Sendable.
+        var results = [PackCheckOutcome?](repeating: nil, count: gitEntries.count)
+        results.withUnsafeMutableBufferPointer { buffer in
+            nonisolated(unsafe) let buf = buffer
+            DispatchQueue.concurrentPerform(iterations: gitEntries.count) { index in
+                let entry = gitEntries[index]
+                // Refs are user-controllable via `mcs pack add --ref` and persisted in `registry.yaml`;
+                // a corrupted ref starting with `-` would be interpreted as a git option (argument
+                // injection). Skip the pack — registry corruption is permanent (unlike a transient
+                // ls-remote failure), so emit to MCS_DEBUG so the silent skip is at least visible
+                // during development. Production hooks stay quiet per the "non-intrusive" design.
+                if let ref = entry.ref, !isValidGitRef(ref) {
+                    if Environment.isDebugMode {
+                        let message = "mcs: skipping update check for '\(entry.identifier)': invalid ref '\(ref)'\n"
+                        FileHandle.standardError.write(Data(message.utf8))
+                    }
+                    return
                 }
-                return
-            }
-            let lsRemote = shell.run(
-                environment.gitPath,
-                arguments: ["ls-remote", entry.sourceURL, entry.ref ?? "HEAD"],
-                additionalEnvironment: Self.gitNoPromptEnv
-            )
+                let lsRemote = shell.run(
+                    environment.gitPath,
+                    arguments: ["ls-remote", entry.sourceURL, entry.ref ?? "HEAD"],
+                    additionalEnvironment: Self.gitNoPromptEnv
+                )
 
-            guard lsRemote.succeeded,
-                  let remoteSHA = Self.parseRemoteSHA(from: lsRemote.stdout),
-                  remoteSHA != entry.commitSHA
-            else {
-                return
-            }
+                guard lsRemote.succeeded,
+                      let remoteSHA = Self.parseRemoteSHA(from: lsRemote.stdout),
+                      remoteSHA != entry.commitSHA
+                else {
+                    return
+                }
 
-            let pendingUpdate = PackUpdate(
-                identifier: entry.identifier,
-                displayName: entry.displayName,
-                localSHA: entry.commitSHA,
-                remoteSHA: remoteSHA
-            )
+                let pendingUpdate = PackUpdate(
+                    identifier: entry.identifier,
+                    displayName: entry.displayName,
+                    localSHA: entry.commitSHA,
+                    remoteSHA: remoteSHA
+                )
 
-            switch classifyUpstreamChange(entry: entry) {
-            case .suppressed:
-                results[index] = .advance(identifier: entry.identifier, newSHA: remoteSHA)
-            case .material, .unknown:
-                results[index] = .emit(pendingUpdate)
+                switch classifyUpstreamChange(entry: entry) {
+                case .suppressed:
+                    buf[index] = .advance(identifier: entry.identifier, newSHA: remoteSHA)
+                case .material, .unknown:
+                    buf[index] = .emit(pendingUpdate)
+                }
             }
         }
 
