@@ -153,25 +153,23 @@ struct UpdateCommand: LockedCommand {
         let hasGlobal = runs.contains(where: \.isGlobal)
         guard !projectRuns.isEmpty || hasGlobal else { return true }
 
-        let scopeSummary = if hasGlobal, !projectRuns.isEmpty {
-            "the global scope plus \(projectRuns.count) project(s)"
-        } else if hasGlobal {
-            "the global scope"
-        } else {
-            "\(projectRuns.count) project(s)"
-        }
+        let totalScopes = (hasGlobal ? 1 : 0) + projectRuns.count
+        let scopeNoun = totalScopes == 1 ? "scope" : "scopes"
 
-        output.warn("--all-projects will refresh \(scopeSummary):")
+        output.plain("")
+        output.warn("--all-projects will refresh \(totalScopes) \(scopeNoun):")
+        output.plain("")
         if hasGlobal {
-            output.plain("  • global (\(env.claudeDirectory.path))")
+            output.plain("  • global    \(env.claudeDirectory.path)")
         }
         for run in projectRuns {
             if let projectPath = run.projectPath {
-                output.plain("  • \(projectPath.path)")
+                output.plain("  • project   \(projectPath.path)")
             }
         }
-        output.plain("  Each project's pack-defined hooks will run with that project as cwd.")
-        output.plain("  Uncommitted changes in those projects may be overwritten by managed files.")
+        output.plain("")
+        output.plain("  Note: pack-defined hooks run with each project as cwd, and uncommitted")
+        output.plain("        changes to managed files (settings, hooks, skills) may be overwritten.")
         output.plain("")
         return output.askYesNo("Proceed?", default: false)
     }
