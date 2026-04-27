@@ -51,7 +51,7 @@ struct UpdateCommand: LockedCommand {
             return
         }
 
-        if allProjects, !confirmFanOut(runs: runs, output: output) {
+        if allProjects, !confirmFanOut(runs: runs, env: env, output: output) {
             output.info("Update cancelled.")
             return
         }
@@ -144,20 +144,32 @@ struct UpdateCommand: LockedCommand {
 
     private func confirmFanOut(
         runs: [UpdateScopeResolver.ScopeRun],
+        env: Environment,
         output: CLIOutput
     ) -> Bool {
         guard !dryRun, output.hasInteractiveStdin else { return true }
 
         let projectRuns = runs.filter { !$0.isGlobal }
-        guard !projectRuns.isEmpty else { return true }
+        let hasGlobal = runs.contains(where: \.isGlobal)
+        guard !projectRuns.isEmpty || hasGlobal else { return true }
 
-        output.warn("--all-projects will refresh \(projectRuns.count) project(s):")
+        let scopeSummary = if hasGlobal, !projectRuns.isEmpty {
+            "the global scope plus \(projectRuns.count) project(s)"
+        } else if hasGlobal {
+            "the global scope"
+        } else {
+            "\(projectRuns.count) project(s)"
+        }
+
+        output.warn("--all-projects will refresh \(scopeSummary):")
+        if hasGlobal {
+            output.plain("  • global (\(env.claudeDirectory.path))")
+        }
         for run in projectRuns {
             if let projectPath = run.projectPath {
                 output.plain("  • \(projectPath.path)")
             }
         }
-        output.plain("")
         output.plain("  Each project's pack-defined hooks will run with that project as cwd.")
         output.plain("  Uncommitted changes in those projects may be overwritten by managed files.")
         output.plain("")
