@@ -26,9 +26,43 @@ mcs sync --update                # Fetch latest and write/update mcs.lock.yaml (
 | `--customize` | Per-pack component selection (deselect individual components). |
 | `--global` | Sync global-scope components (brew packages, plugins, MCP servers to `~/.claude/`). |
 | `--lock` | Check out the commits pinned in `mcs.lock.yaml`. |
-| `--update` | Fetch latest pack versions and write/update `mcs.lock.yaml`. Lockfile generation is opt-in; this flag forces a write for the current run regardless of the `generate-lockfile` config. |
+| `--update` | **Deprecated** — use `mcs update` instead. Fetches latest pack versions and force-writes `mcs.lock.yaml` regardless of the `generate-lockfile` config. |
 
 `mcs sync` is also the default command — running `mcs` alone is equivalent to `mcs sync`.
+
+## `mcs update`
+
+Refresh already-configured packs across every scope they're installed in. Fetches the latest pack contents (with trust verification) and re-applies the existing pack set in both the global scope and the current project's scope.
+
+```bash
+mcs update                       # Refresh all configured packs in every scope (global + current project)
+mcs update --pack <name>         # Only refresh specific pack(s) (repeatable)
+mcs update --global              # Only refresh the global scope
+mcs update --project             # Only refresh the current project's scope
+mcs update --all-projects        # Refresh global + every project in the index (machine-wide)
+mcs update --dry-run             # Preview without making changes
+```
+
+| Flag | Description |
+|------|-------------|
+| `[path]` | Project directory (defaults to current directory) |
+| `--pack <name>` | Limit the update to specific pack(s). Repeatable. Must be a pack already configured in at least one scope. |
+| `--global` | Only refresh the global scope. Mutually exclusive with `--project` and `--all-projects`. |
+| `--project` | Only refresh the current project's scope. Mutually exclusive with `--global` and `--all-projects`. |
+| `--all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. Asks for confirmation in interactive mode and lists the affected projects first. Mutually exclusive with `--global` and `--project`. |
+| `--dry-run` | Preview changes without writing any files. |
+
+**About `--all-projects`:** this fans out machine-wide, running each pack's `configureProject` hook with the corresponding project as cwd. Uncommitted changes in those projects to managed files (settings, hooks, skills) may be overwritten. Always interactive-confirm in a terminal; pair with `--dry-run` first if unsure.
+
+**Differences from `mcs sync`:**
+
+- **Refresh-only** — does not add or remove packs. Use `mcs sync` to change the configured set.
+- **Multi-scope by default** — when configured packs exist in both global and project scopes, both are refreshed in one command (this was the original pain point that motivated the verb).
+- **Lockfile is gated by config** — `mcs update` writes `mcs.lock.yaml` only when `generate-lockfile: true`. Drift is reported when the key is unset and a lockfile is present (the upgrade nudge). This is intentionally different from the deprecated `mcs sync --update`, which force-writes the lockfile regardless of config.
+
+**Trust prompts:** when a pack's scripts have changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run (the registry stays at the old SHA, and the pack is excluded from re-apply so untrusted scripts don't auto-install). The prompt re-fires on the next `mcs update` run.
+
+**Prompt value reuse:** unlike `mcs sync`, `mcs update` does not show the interactive *"Reuse these values? [Y/n]"* gate when a pack's prompts already have stored answers. Refresh implies "keep what I have," so existing values are reused silently. **New** prompts introduced by a pack update still execute normally. To revisit stored values, use `mcs sync` (answer "No" at the gate to re-enter values one by one, with the existing answer as the default) or `mcs sync --customize` (always re-asks every prompt, no gate).
 
 ## `mcs pack`
 
@@ -72,8 +106,10 @@ mcs pack list                    # List registered packs with status
 
 ### `mcs pack update [name]`
 
+> **Deprecated.** Use [`mcs update`](#mcs-update) instead — it fetches latest pack contents *and* re-applies them across every configured scope in one step. `mcs pack update` only refreshes the local pack checkout without applying the changes anywhere.
+
 ```bash
-mcs pack update [name]           # Update pack(s) to latest version
+mcs pack update [name]           # Update pack(s) to latest version (no re-apply)
 ```
 
 Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically).

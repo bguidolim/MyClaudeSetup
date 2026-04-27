@@ -99,7 +99,7 @@ Before modifying files with user content (e.g., `CLAUDE.local.md`), a timestampe
 
 ### Lockfile (`Core/Lockfile.swift`)
 
-`mcs.lock.yaml` pins pack commits for reproducible builds. Generation is **opt-in** (default off) — enable persistently with `mcs config set generate-lockfile true` or write once with `mcs sync --update`. Tri-state on `generate-lockfile`: `true` writes on every sync; `false` is fully silent (explicit opt-out); `nil` (never configured) reports SHA drift against a pre-existing lockfile so users upgrading from the auto-generation era see their stale lockfile. Used with `--lock` to checkout pinned commits.
+`mcs.lock.yaml` pins pack commits for reproducible builds. Generation is **opt-in** (default off) — enable persistently with `mcs config set generate-lockfile true` or write once with the deprecated `mcs sync --update`. Tri-state on `generate-lockfile`: `true` writes on every sync; `false` is fully silent (explicit opt-out); `nil` (never configured) reports SHA drift against a pre-existing lockfile so users upgrading from the auto-generation era see their stale lockfile. Used with `--lock` to checkout pinned commits. `mcs update` respects the config (writes only when `true`) and never force-writes the way `--update` does.
 
 ### ClaudeIntegration (`Core/ClaudeIntegration.swift`)
 
@@ -341,7 +341,7 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 | **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
 | **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |
 | **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. Modified scripts are detected and the user is prompted to re-trust before proceeding. Local packs skip verification since scripts change during development. |
-| **Lockfile (opt-in)** | `mcs.lock.yaml` pins pack commits for reproducible environments. Generation is off by default; enable with `mcs config set generate-lockfile true` or write once with `mcs sync --update`. Explicit `generate-lockfile: false` is silent; only the never-configured `nil` state surfaces drift warnings against a stale pre-existing lockfile. Use `--lock` to check out pinned versions from an existing lockfile. |
+| **Lockfile (opt-in)** | `mcs.lock.yaml` pins pack commits for reproducible environments. Generation is off by default; enable with `mcs config set generate-lockfile true` or write once with the deprecated `mcs sync --update`. Explicit `generate-lockfile: false` is silent; only the never-configured `nil` state surfaces drift warnings against a stale pre-existing lockfile. Use `--lock` to check out pinned versions from an existing lockfile. `mcs update` honours `generate-lockfile` and never force-writes. |
 
 ## Concurrency Model
 

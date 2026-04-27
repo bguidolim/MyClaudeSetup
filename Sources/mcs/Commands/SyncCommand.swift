@@ -53,6 +53,10 @@ struct SyncCommand: LockedCommand {
 
         // Handle --update: fetch latest for all packs before loading
         if update {
+            output.warn(
+                "'mcs sync --update' is deprecated. Use 'mcs update' to fetch and re-apply across all configured scopes; "
+                    + "combine with 'mcs config set generate-lockfile true' if you want a lockfile."
+            )
             let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
             try lockOps.updatePacks()
         }

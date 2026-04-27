@@ -18,6 +18,16 @@ struct ProjectIndex {
         var packs: [String]
         /// ISO 8601 timestamp of the last sync.
         var lastSynced: String
+
+        /// Whether this entry represents the global scope rather than a project.
+        var isGlobal: Bool {
+            path == ProjectIndex.globalSentinel
+        }
+
+        /// File URL for project entries. Returns `nil` for the global sentinel.
+        var url: URL? {
+            isGlobal ? nil : URL(fileURLWithPath: path)
+        }
     }
 
     struct IndexData: Codable {
