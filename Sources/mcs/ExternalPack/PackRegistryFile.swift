@@ -22,6 +22,11 @@ struct PackRegistryFile {
             isLocal ?? false
         }
 
+        /// 7-character short prefix of the commit SHA for display.
+        var shortSHA: String {
+            String(commitSHA.prefix(7))
+        }
+
         /// Resolve the on-disk path for this pack entry.
         /// Local packs store an absolute path; git packs store a path relative to `packsDirectory`.
         /// Returns `nil` if the local path is invalid or the git path escapes the packs directory.

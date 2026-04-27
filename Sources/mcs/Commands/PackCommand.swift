@@ -677,7 +677,7 @@ struct UpdatePack: LockedCommand {
             case let .updated(updatedEntry):
                 ctx.registry.register(updatedEntry, in: &updatedData)
                 updatedCount += 1
-                ctx.output.success("\(entry.displayName): updated (\(updatedEntry.commitSHA.prefix(7)))")
+                ctx.output.success("\(entry.displayName): updated (\(updatedEntry.shortSHA))")
             case let .skipped(reason):
                 ctx.output.warn("\(entry.identifier): \(reason)")
             }
@@ -692,7 +692,7 @@ struct UpdatePack: LockedCommand {
                 throw ExitCode.failure
             }
             ctx.output.plain("")
-            ctx.output.info("Run 'mcs sync' to apply updated pack components.")
+            ctx.output.info("Run 'mcs update' to apply updates across all configured scopes.")
         }
     }
 }

@@ -14,6 +14,7 @@ struct MCS: ParsableCommand {
         version: MCSVersion.current,
         subcommands: [
             SyncCommand.self,
+            UpdateCommand.self,
             DoctorCommand.self,
             CleanupCommand.self,
             PackCommand.self,

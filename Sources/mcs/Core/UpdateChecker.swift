@@ -605,7 +605,7 @@ struct UpdateChecker {
                     let remote = String(pack.remoteSHA.prefix(7))
                     output.plain("         \u{2022} \(pack.displayName) (\(local) \u{2192} \(remote))")
                 }
-                output.plain("       Run 'mcs pack update' to update.")
+                output.plain("       Run 'mcs update' to update and re-apply across configured scopes.")
             }
         }
 
@@ -632,7 +632,7 @@ struct UpdateChecker {
             let noun = result.packUpdates.count == 1 ? "tech pack has" : "tech packs have"
             lines.append(
                 "- \(result.packUpdates.count) \(noun) updates available: \(names)."
-                    + " The user should run: mcs pack update"
+                    + " The user should run: mcs update"
             )
         }
         return lines.joined(separator: "\n")

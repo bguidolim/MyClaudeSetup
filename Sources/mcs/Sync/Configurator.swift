@@ -178,11 +178,16 @@ struct Configurator {
     /// - Parameter confirmRemovals: When `true`, prompt the user before removing packs.
     ///   Pass `false` for non-interactive paths (`--pack`, `--all`).
     /// - Parameter excludedComponents: Component IDs excluded per pack (packID -> Set<componentID>).
+    /// - Parameter reusePriorValuesSilently: When `true`, skip the interactive
+    ///   "Reuse these values?" gate even when stdin is a TTY — used by
+    ///   `mcs update`, where re-asking only makes sense for genuinely new prompts.
+    ///   Existing priors are silently reused; new prompts still execute.
     func configure(
         packs: [any TechPack],
         confirmRemovals: Bool = true,
         excludedComponents: [String: Set<String>] = [:],
-        customize: Bool = false
+        customize: Bool = false,
+        reusePriorValuesSilently: Bool = false
     ) throws {
         var state = try ProjectState(stateFile: scope.stateFile)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
@@ -238,7 +243,10 @@ struct Configurator {
         let priorResolvedValues = state.resolvedValues ?? [:]
 
         // 3–4b. Resolve all template/placeholder values upfront (single pass)
-        let allValues = try resolveAllValues(packs: packs, state: &state, customize: customize)
+        let allValues = try resolveAllValues(
+            packs: packs, state: &state, customize: customize,
+            reusePriorValuesSilently: reusePriorValuesSilently
+        )
 
         // 4c. Pre-load templates (single disk read per pack), filtering excluded dependencies
         let preloadedTemplates = preloadTemplates(
@@ -637,7 +645,8 @@ struct Configurator {
     private func resolveAllValues(
         packs: [any TechPack],
         state: inout ProjectState,
-        customize: Bool
+        customize: Bool,
+        reusePriorValuesSilently: Bool
     ) throws -> [String: String] {
         let priorValues = state.resolvedValues ?? [:]
         var allValues = strategy.resolveBuiltInValues(shell: shell, output: output)
@@ -655,7 +664,8 @@ struct Configurator {
         let seedFromPriors = decideSeedStrategy(
             reusableValues: reusableValues,
             newDeclaredKeys: newDeclaredKeys,
-            customize: customize
+            customize: customize,
+            reusePriorValuesSilently: reusePriorValuesSilently
         )
         if seedFromPriors {
             allValues.merge(reusableValues) { existing, _ in existing }
@@ -711,16 +721,25 @@ struct Configurator {
     /// added since last sync reuses old values and prompts only for the new ones.
     /// Interactive with only reusable prompts shows the key list (values masked —
     /// prompts often hold secrets) and gates on a single Y/n.
+    /// `reusePriorValuesSilently` (set by `mcs update`) collapses the interactive-only
+    /// branches into the same silent-reuse path used for non-interactive runs.
     private func decideSeedStrategy(
         reusableValues: [String: String],
         newDeclaredKeys: Set<String>,
-        customize: Bool
+        customize: Bool,
+        reusePriorValuesSilently: Bool
     ) -> Bool {
         guard !reusableValues.isEmpty else { return false }
         if customize { return false }
 
         if !output.hasInteractiveStdin {
             output.dimmed("Reusing \(reusableValues.count) previously configured value(s) from last sync.")
+            return true
+        }
+
+        if reusePriorValuesSilently {
+            let suffix = newDeclaredKeys.isEmpty ? "." : "; asking for \(newDeclaredKeys.count) new."
+            output.dimmed("Reusing \(reusableValues.count) previously configured value(s)\(suffix)")
             return true
         }
 

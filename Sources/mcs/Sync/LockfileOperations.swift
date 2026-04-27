@@ -117,7 +117,7 @@ struct LockfileOperations {
                 output.dimmed("  \(entry.identifier): already up to date")
             case let .updated(updatedEntry):
                 registryFile.register(updatedEntry, in: &updatedData)
-                output.success("  \(entry.identifier): updated (\(String(updatedEntry.commitSHA.prefix(7))))")
+                output.success("  \(entry.identifier): updated (\(updatedEntry.shortSHA))")
             case let .skipped(reason):
                 output.warn("  \(entry.identifier): \(reason)")
             }
