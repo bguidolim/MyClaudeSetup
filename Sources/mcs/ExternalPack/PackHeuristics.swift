@@ -19,13 +19,28 @@ enum PackHeuristics {
         findings += checkEmptyPack(manifest: manifest)
         findings += checkRootSourceCopy(components: components)
         findings += checkSettingsFileSources(components: components, packPath: packPath)
-        findings += checkUnreferencedFiles(manifest: manifest, packPath: packPath)
-        findings += checkRootLevelContentFiles(manifest: manifest, packPath: packPath)
+        let unreferenced = checkUnreferencedFiles(manifest: manifest, packPath: packPath)
+            + checkRootLevelContentFiles(manifest: manifest, packPath: packPath)
+        findings += unreferenced
         findings += checkMCPDependencyGaps(components: components)
         findings += checkPythonModulePaths(components: components, packPath: packPath)
 
+        // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
+        // (not for the IO-failure warnings that share the same severity).
+        if unreferenced.contains(where: { $0.severity == .warning && $0.message.contains(Self.unreferencedMarker) }) {
+            findings.append(Finding(
+                severity: .warning,
+                message: "Add intentional non-material paths (docs/, examples/, assets) to the"
+                    + " `ignore:` field in techpack.yaml to silence these warnings."
+            ))
+        }
+
         return findings
     }
+
+    /// Sentinel substring shared between the `unreferenced file` warning emitters and the hint
+    /// detector in `check(...)`. Keep the two emit sites and the detector aligned.
+    static let unreferencedMarker = "is not referenced"
 
     // MARK: - Individual Checks
 
@@ -175,7 +190,7 @@ enum PackHeuristics {
                 if isIgnoredByManifest(relativePath, manifest: manifest) { continue }
                 findings.append(Finding(
                     severity: .warning,
-                    message: "\(relativePath) is not referenced by any component or template"
+                    message: "\(relativePath) \(Self.unreferencedMarker) by any component or template"
                 ))
             }
         }
@@ -238,10 +253,12 @@ enum PackHeuristics {
             guard fm.fileExists(atPath: itemURL.path, isDirectory: &isDir), !isDir.boolValue else { continue }
 
             let name = itemURL.lastPathComponent
-            if !infrastructureFiles.contains(name), !referencedRootFiles.contains(name) {
+            if !infrastructureFiles.contains(name),
+               !referencedRootFiles.contains(name),
+               !isIgnoredByManifest(name, manifest: manifest) {
                 findings.append(Finding(
                     severity: .warning,
-                    message: "\(name) is not referenced by any component"
+                    message: "\(name) \(Self.unreferencedMarker) by any component"
                 ))
             }
         }
