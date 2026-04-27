@@ -7,7 +7,7 @@ import Foundation
 /// remotes produce no output, matching the design goal of non-intrusive checks.
 struct UpdateChecker {
     let environment: Environment
-    let shell: ShellRunner
+    let shell: any ShellRunning
 
     /// Default cooldown interval: 24 hours.
     static let cooldownInterval: TimeInterval = 86400
@@ -168,42 +168,245 @@ struct UpdateChecker {
 
     // MARK: - Pack Checks
 
+    /// Classification of an upstream commit-SHA change. Drives whether the noise filter
+    /// suppresses the update notification.
+    enum UpstreamChange: Equatable {
+        case suppressed
+        case material([String])
+        case unknown(UnknownReason)
+
+        /// Why a classification could not be made. Carries enough context for telemetry
+        /// without requiring callers to inspect the orchestrator's call sites.
+        enum UnknownReason: Equatable {
+            case missingClone
+            case fetchFailed
+            case diffFailed
+        }
+    }
+
+    /// Pure classifier for the changed-path list returned by `git diff --name-only`.
+    /// No I/O — unit-testable in isolation. The orchestrator (`classifyUpstreamChange`)
+    /// runs git and calls into this.
+    ///
+    /// Rules, applied in order:
+    /// 1. If any path equals `techpack.yaml` → `.material` (supply-chain invariant —
+    ///    manifest edits can swap hook scripts, MCP commands, install surface).
+    /// 2. A path is "noise" if its leading segment matches `PackHeuristics.ignoredDirectories`
+    ///    (e.g. `.github/workflows/ci.yml`) OR the path is a single segment that matches
+    ///    `PackHeuristics.infrastructureFilesForUpdateCheck` (e.g. `README.md` at the pack
+    ///    root, but not `hooks/README.md`).
+    /// 3. If all paths are noise → `.suppressed`. Any survivor → `.material(survivors)`.
+    ///
+    /// Empty input maps to `.suppressed`: `git diff --name-only` only produces empty output
+    /// after a successful diff that found no changed paths, which is a "definitely no
+    /// material change" signal — not an unknown one.
+    static func classifyDiffPaths(_ paths: [String]) -> UpstreamChange {
+        // `.whitespacesAndNewlines` (not `.whitespaces`) so a trailing `\r` from CRLF
+        // output (git with `core.autocrlf=true`) gets stripped — otherwise `README.md\r`
+        // would miss the deny-list and surface as material.
+        let cleaned = paths
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return .suppressed }
+
+        if cleaned.contains(Constants.ExternalPacks.manifestFilename) {
+            return .material([Constants.ExternalPacks.manifestFilename])
+        }
+
+        let material = cleaned.filter { !isNoisePath($0) }
+        return material.isEmpty ? .suppressed : .material(material)
+    }
+
+    private static func isNoisePath(_ path: String) -> Bool {
+        let leadingSegment = path.split(separator: "/", maxSplits: 1).first.map(String.init) ?? path
+        if PackHeuristics.ignoredDirectories.contains(leadingSegment) {
+            return true
+        }
+        // Basename match only when the path is a single segment — a file called `README.md`
+        // inside `hooks/` (i.e. `hooks/README.md`) is not suppressed; only pack-root infra is.
+        if !path.contains("/"), PackHeuristics.infrastructureFilesForUpdateCheck.contains(path) {
+            return true
+        }
+        return false
+    }
+
+    /// Orchestrator — runs `git fetch` + `git diff --name-only` in the pack clone and feeds
+    /// the diff into `classifyDiffPaths`.
+    ///
+    /// **Never-hide invariant (orchestrator scope):** within this function, every operational
+    /// failure (missing clone, fetch failure, diff failure) returns `.unknown(reason)` so the
+    /// caller can surface the notification unfiltered. `.suppressed` is reserved for diffs
+    /// successfully classified as all-noise. The earlier `git ls-remote` and SHA-parsing path
+    /// in `checkPackUpdates` is a separate guard — when we can't determine whether there is an
+    /// upstream change at all, the closure exits without producing an outcome (consistent with
+    /// the file-level "Network failures are silently ignored" design goal).
+    ///
+    /// Mirrors `PackFetcher.update` for the fetch shape: when `entry.ref == nil`, fetch without
+    /// a ref arg and diff against `origin/HEAD` (more reliable across git servers than passing
+    /// `HEAD` as a positional ref). When `entry.ref` is set, fetch that ref explicitly and diff
+    /// against `FETCH_HEAD`.
+    func classifyUpstreamChange(entry: PackRegistryFile.PackEntry) -> UpstreamChange {
+        // `resolvedPath` only validates the path shape; it doesn't stat the filesystem. If the
+        // clone was deleted out from under us (e.g. user `rm -rf`'d `~/.mcs/packs/foo`), classify
+        // as `.missingClone` instead of letting git fail with a bogus cwd — same outcome at the
+        // call site (notification surfaces) but accurate telemetry and one fewer subprocess.
+        guard let workDirURL = entry.resolvedPath(packsDirectory: environment.packsDirectory),
+              FileManager.default.fileExists(atPath: workDirURL.path)
+        else {
+            return .unknown(.missingClone)
+        }
+        let workDir = workDirURL.path
+
+        let fetchArgs: [String]
+        let diffTarget: String
+        if let ref = entry.ref {
+            // Refs are read from `registry.yaml`; if user-edited or corrupted, a ref starting
+            // with `-` would be interpreted as a git option (argument injection). Validate
+            // before invoking git; treat invalid refs as a fetch failure so the never-hide
+            // invariant still surfaces a notification.
+            guard isValidGitRef(ref) else { return .unknown(.fetchFailed) }
+            fetchArgs = ["fetch", "--depth", "1", "origin", ref]
+            diffTarget = "FETCH_HEAD"
+        } else {
+            fetchArgs = ["fetch", "--depth", "1", "origin"]
+            diffTarget = "origin/HEAD"
+        }
+
+        let fetchResult = shell.run(
+            environment.gitPath,
+            arguments: fetchArgs,
+            workingDirectory: workDir,
+            additionalEnvironment: Self.gitNoPromptEnv
+        )
+        guard fetchResult.succeeded else { return .unknown(.fetchFailed) }
+
+        let diffResult = shell.run(
+            environment.gitPath,
+            arguments: ["diff", "--name-only", "HEAD", diffTarget],
+            workingDirectory: workDir,
+            additionalEnvironment: Self.gitNoPromptEnv
+        )
+        guard diffResult.succeeded else { return .unknown(.diffFailed) }
+
+        let paths = diffResult.stdout.split(separator: "\n").map(String.init)
+        return Self.classifyDiffPaths(paths)
+    }
+
+    /// Per-iteration result of `checkPackUpdates`. Sum type — exactly one of:
+    /// surface a notification, OR advance the registry baseline. The unreachable
+    /// "both" state in the prior optional-pair encoding would have produced a
+    /// stuck-update bug (notify + silently advance), so the type rules it out.
+    private enum PackCheckOutcome {
+        case emit(PackUpdate)
+        case advance(identifier: String, newSHA: String)
+    }
+
     /// Check each git pack for remote updates via `git ls-remote`.
     /// Local packs are skipped. Checks run in parallel. Network failures are silently ignored per-pack.
+    ///
+    /// When a remote SHA differs, runs the noise filter (`classifyUpstreamChange`) which may
+    /// suppress the notification for README/CI/infra-only commits and advance the registry
+    /// baseline so the same commits don't re-trigger.
     func checkPackUpdates(entries: [PackRegistryFile.PackEntry]) -> [PackUpdate] {
         let gitEntries = entries.filter { !$0.isLocalPack }
         guard !gitEntries.isEmpty else { return [] }
 
-        // Each index is written by exactly one iteration — no data race.
-        // nonisolated(unsafe) is needed because concurrentPerform's closure is @Sendable.
-        nonisolated(unsafe) var results = [PackUpdate?](repeating: nil, count: gitEntries.count)
+        // Each index is written by exactly one iteration. We write through a raw buffer pointer
+        // rather than the `Array` subscript so the parallel writes touch only distinct element
+        // addresses — no Array COW header / refcount machinery in the hot path. The `nonisolated(unsafe)`
+        // capture is still needed because `UnsafeMutableBufferPointer` is not Sendable.
+        var results = [PackCheckOutcome?](repeating: nil, count: gitEntries.count)
+        results.withUnsafeMutableBufferPointer { buffer in
+            nonisolated(unsafe) let buf = buffer
+            DispatchQueue.concurrentPerform(iterations: gitEntries.count) { index in
+                let entry = gitEntries[index]
+                // Refs are user-controllable via `mcs pack add --ref` and persisted in `registry.yaml`;
+                // a corrupted ref starting with `-` would be interpreted as a git option (argument
+                // injection). Skip the pack — registry corruption is permanent (unlike a transient
+                // ls-remote failure), so emit to MCS_DEBUG so the silent skip is at least visible
+                // during development. Production hooks stay quiet per the "non-intrusive" design.
+                if let ref = entry.ref, !isValidGitRef(ref) {
+                    if Environment.isDebugMode {
+                        let message = "mcs: skipping update check for '\(entry.identifier)': invalid ref '\(ref)'\n"
+                        FileHandle.standardError.write(Data(message.utf8))
+                    }
+                    return
+                }
+                let lsRemote = shell.run(
+                    environment.gitPath,
+                    arguments: ["ls-remote", entry.sourceURL, entry.ref ?? "HEAD"],
+                    additionalEnvironment: Self.gitNoPromptEnv
+                )
 
-        DispatchQueue.concurrentPerform(iterations: gitEntries.count) { index in
-            let entry = gitEntries[index]
-            let ref = entry.ref ?? "HEAD"
-            let result = shell.run(
-                environment.gitPath,
-                arguments: ["ls-remote", entry.sourceURL, ref],
-                additionalEnvironment: Self.gitNoPromptEnv
-            )
+                guard lsRemote.succeeded,
+                      let remoteSHA = Self.parseRemoteSHA(from: lsRemote.stdout),
+                      remoteSHA != entry.commitSHA
+                else {
+                    return
+                }
 
-            guard result.succeeded,
-                  let remoteSHA = Self.parseRemoteSHA(from: result.stdout)
-            else {
-                return
-            }
-
-            if remoteSHA != entry.commitSHA {
-                results[index] = PackUpdate(
+                let pendingUpdate = PackUpdate(
                     identifier: entry.identifier,
                     displayName: entry.displayName,
                     localSHA: entry.commitSHA,
                     remoteSHA: remoteSHA
                 )
+
+                switch classifyUpstreamChange(entry: entry) {
+                case .suppressed:
+                    buf[index] = .advance(identifier: entry.identifier, newSHA: remoteSHA)
+                case .material, .unknown:
+                    buf[index] = .emit(pendingUpdate)
+                }
             }
         }
 
-        return results.compactMap(\.self)
+        var updates: [PackUpdate] = []
+        var advances: [(identifier: String, newSHA: String)] = []
+        for outcome in results {
+            switch outcome {
+            case nil: continue
+            case let .emit(update): updates.append(update)
+            case let .advance(identifier, newSHA): advances.append((identifier, newSHA))
+            }
+        }
+        if !advances.isEmpty {
+            applyRegistryAdvances(advances)
+        }
+        return updates
+    }
+
+    /// Apply collected SHA advances to `registry.yaml` in one load→mutate→save round-trip.
+    /// Serializes the writes that were collected from the parallel `concurrentPerform` loop.
+    ///
+    /// Acquires `~/.mcs/lock` non-blocking before the load→mutate→save. `CheckUpdatesCommand`
+    /// runs as a SessionStart hook and is not itself a `LockedCommand`; without the lock, a
+    /// concurrent `mcs pack add/update` (which is locked) could read the registry between our
+    /// load and save and have its write clobbered. On lock contention we skip silently — the
+    /// next check re-classifies and retries.
+    ///
+    /// All other failures are non-fatal too: the registry stays at the old commit SHA, so the
+    /// next check re-runs the classifier and either suppresses again (re-attempting the write)
+    /// or surfaces the notification. We avoid `output.warn` here because this runs inside the
+    /// SessionStart hook path where the "non-intrusive checks" design goal precludes user-facing
+    /// noise; failures emit to stderr only when `MCS_DEBUG` is set.
+    private func applyRegistryAdvances(_ advances: [(identifier: String, newSHA: String)]) {
+        do {
+            try withFileLock(at: environment.lockFile) {
+                let registry = PackRegistryFile(path: environment.packsRegistry)
+                var data = try registry.load()
+                for advance in advances {
+                    guard let existing = registry.pack(identifier: advance.identifier, in: data) else { continue }
+                    registry.register(existing.withCommitSHA(advance.newSHA), in: &data)
+                }
+                try registry.save(data)
+            }
+        } catch {
+            if Environment.isDebugMode {
+                let message = "mcs: registry advance write failed: \(error.localizedDescription)\n"
+                FileHandle.standardError.write(Data(message.utf8))
+            }
+        }
     }
 
     // MARK: - CLI Version Check
@@ -383,15 +586,39 @@ struct UpdateChecker {
 
     // MARK: - Parsing Helpers
 
-    /// Extract the SHA from the first line of `git ls-remote` output.
-    /// Format: `<sha>\t<ref>\n`
+    /// Extract the commit SHA from `git ls-remote` output. Format: `<sha>\t<ref>\n`.
+    ///
+    /// For annotated tags, ls-remote returns the tag-object SHA on the first line and the
+    /// peeled commit SHA on a second line whose ref ends with `^{}`. Prefer the peeled line
+    /// when present so the returned SHA matches what the working tree's `rev-parse HEAD`
+    /// would resolve to — writing a tag-object SHA into `registry.yaml` desyncs the registry
+    /// from the checkout and trips PackUpdater's "disk ahead of registry" recovery path.
     static func parseRemoteSHA(from output: String) -> String? {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
-        let sha = firstLine.split(separator: "\t", maxSplits: 1).first.map(String.init)
-        guard let sha, !sha.isEmpty else { return nil }
-        return sha
+
+        var firstSHA: String?
+        for line in trimmed.split(separator: "\n", omittingEmptySubsequences: true) {
+            let parts = line.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let sha = String(parts[0])
+            let ref = parts[1]
+            guard !sha.isEmpty else { continue }
+            if ref.hasSuffix("^{}") {
+                return sha
+            }
+            if firstSHA == nil {
+                firstSHA = sha
+            }
+        }
+
+        // Fallback for malformed single-line output that has no tab — preserve historical behavior.
+        if firstSHA == nil {
+            let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
+            let sha = firstLine.split(separator: "\t", maxSplits: 1).first.map(String.init) ?? ""
+            return sha.isEmpty ? nil : sha
+        }
+        return firstSHA
     }
 
     /// Find the latest CalVer tag from `git ls-remote --tags --refs` output.

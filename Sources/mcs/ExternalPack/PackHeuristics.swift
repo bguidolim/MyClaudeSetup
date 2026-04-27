@@ -79,7 +79,7 @@ enum PackHeuristics {
     }
 
     /// Directories at the pack root that are infrastructure, not pack content.
-    private static let ignoredDirectories: Set<String> = [
+    static let ignoredDirectories: Set<String> = [
         ".git", ".github", ".gitlab", ".vscode",
         "node_modules", "__pycache__", ".build",
     ]
@@ -168,12 +168,22 @@ enum PackHeuristics {
     }
 
     /// Files at the pack root that are expected infrastructure, not content.
+    /// Used by `checkRootLevelContentFiles` to avoid warning about these files.
+    /// Intentionally includes `techpack.yaml` — see `infrastructureFilesForUpdateCheck`
+    /// below for the (deliberately different) set the update-check filter uses.
     private static let infrastructureFiles: Set<String> = [
         Constants.ExternalPacks.manifestFilename, "README.md", "README", "LICENSE", "LICENSE.md",
         "CHANGELOG.md", "CONTRIBUTING.md", ".gitignore", ".editorconfig",
         "package.json", "package-lock.json", "requirements.txt",
         "Makefile", "Dockerfile", ".dockerignore",
     ]
+
+    /// Used by `UpdateChecker`'s noise filter. Excludes `techpack.yaml` because
+    /// manifest edits can swap the install surface (hooks, MCP commands) — silently
+    /// suppressing them would be a supply-chain attack vector. Do not deduplicate
+    /// these sets.
+    static let infrastructureFilesForUpdateCheck: Set<String> =
+        infrastructureFiles.subtracting([Constants.ExternalPacks.manifestFilename])
 
     private static func checkRootLevelContentFiles(
         manifest: ExternalPackManifest,

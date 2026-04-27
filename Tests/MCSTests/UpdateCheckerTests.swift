@@ -237,6 +237,567 @@ struct UpdateCheckerPerformCheckTests {
     }
 }
 
+// MARK: - Noise Filter Tests (issue #338)
+
+struct UpdateCheckerClassifyDiffPathsTests {
+    @Test("Empty diff → suppressed")
+    func emptyIsSuppressed() {
+        #expect(UpdateChecker.classifyDiffPaths([]) == .suppressed)
+        #expect(UpdateChecker.classifyDiffPaths(["", "  "]) == .suppressed)
+    }
+
+    @Test("README-only diff → suppressed")
+    func readmeOnlySuppressed() {
+        #expect(UpdateChecker.classifyDiffPaths(["README.md"]) == .suppressed)
+    }
+
+    @Test("All-infra root files → suppressed")
+    func infraFilesSuppressed() {
+        let paths = ["README.md", "LICENSE", "CHANGELOG.md", ".gitignore", "Makefile"]
+        #expect(UpdateChecker.classifyDiffPaths(paths) == .suppressed)
+    }
+
+    @Test("techpack.yaml change → always material (supply-chain invariant)")
+    func manifestAlwaysMaterial() {
+        #expect(UpdateChecker.classifyDiffPaths(["techpack.yaml"])
+            == .material(["techpack.yaml"]))
+        // Even mixed with noise, manifest short-circuits to material.
+        #expect(UpdateChecker.classifyDiffPaths(["README.md", "techpack.yaml"])
+            == .material(["techpack.yaml"]))
+    }
+
+    @Test("Ignored-dir leading segment → suppressed")
+    func ignoredDirsSuppressed() {
+        #expect(UpdateChecker.classifyDiffPaths([".github/workflows/ci.yml"]) == .suppressed)
+        #expect(UpdateChecker.classifyDiffPaths(["node_modules/foo/bar.js"]) == .suppressed)
+        #expect(UpdateChecker.classifyDiffPaths([".build/debug/output"]) == .suppressed)
+    }
+
+    @Test("Hook script change → material")
+    func hookScriptMaterial() {
+        let result = UpdateChecker.classifyDiffPaths(["hooks/session-start.sh"])
+        #expect(result == .material(["hooks/session-start.sh"]))
+    }
+
+    @Test("Mixed material + noise → material (only material paths)")
+    func mixedReturnsMaterialOnly() {
+        let result = UpdateChecker.classifyDiffPaths([
+            "README.md", "hooks/session-start.sh", ".github/workflows/ci.yml",
+        ])
+        #expect(result == .material(["hooks/session-start.sh"]))
+    }
+
+    @Test("Infra basename inside subdir → material (basename match only applies to root)")
+    func nonRootInfraNotSuppressed() {
+        // `hooks/README.md` is NOT suppressed — only the pack-root README is.
+        let result = UpdateChecker.classifyDiffPaths(["hooks/README.md"])
+        #expect(result == .material(["hooks/README.md"]))
+    }
+
+    @Test("Unknown root dir (docs/) → material (Phase 1 has no author ignore: yet)")
+    func unknownDirMaterial() {
+        let result = UpdateChecker.classifyDiffPaths(["docs/guide.md"])
+        #expect(result == .material(["docs/guide.md"]))
+    }
+
+    @Test("Whitespace and empty lines are stripped")
+    func whitespaceStripped() {
+        let result = UpdateChecker.classifyDiffPaths([
+            "  README.md  ", "", "   ", "LICENSE",
+        ])
+        #expect(result == .suppressed)
+    }
+
+    @Test("CRLF line endings: trailing `\\r` is stripped before deny-list match")
+    func crlfStrippedBeforeMatch() {
+        // git with `core.autocrlf=true` can emit `path\r\n`. After splitting on `\n`,
+        // each path keeps a trailing `\r`. Without `.whitespacesAndNewlines` trimming,
+        // `README.md\r` would miss the deny-list and surface as material.
+        let result = UpdateChecker.classifyDiffPaths([
+            "README.md\r", ".github/workflows/ci.yml\r",
+        ])
+        #expect(result == .suppressed)
+    }
+}
+
+struct UpdateCheckerOrchestratorTests {
+    private func makeEntry(
+        identifier: String = "pack-a",
+        commitSHA: String = "old123",
+        ref: String? = nil,
+        localPath: String? = nil
+    ) -> PackRegistryFile.PackEntry {
+        PackRegistryFile.PackEntry(
+            identifier: identifier,
+            displayName: identifier,
+            author: nil,
+            sourceURL: "https://example.com/\(identifier).git",
+            ref: ref,
+            commitSHA: commitSHA,
+            localPath: localPath ?? identifier,
+            addedAt: "2026-01-01T00:00:00Z",
+            trustedScriptHashes: [:],
+            isLocal: nil
+        )
+    }
+
+    private func makeChecker(home: URL, mock: MockShellRunner) -> UpdateChecker {
+        UpdateChecker(environment: Environment(home: home), shell: mock)
+    }
+
+    @Test("nil ref: fetch without ref arg, diff against origin/HEAD (mirrors PackFetcher.update)")
+    func nilRefUsesOriginHEAD() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "README.md\nLICENSE\n", stderr: ""),
+        ]
+
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: makeEntry())
+
+        #expect(result == .suppressed)
+        #expect(mock.runCalls.count == 2)
+
+        let expectedWorkDir = Environment(home: tmpDir).packsDirectory
+            .appendingPathComponent("pack-a").path
+        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin"])
+        #expect(mock.runCalls[0].workingDirectory == expectedWorkDir)
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "HEAD", "origin/HEAD"])
+        #expect(mock.runCalls[1].workingDirectory == expectedWorkDir)
+    }
+
+    @Test("fetch + diff succeed with material → material")
+    func fetchDiffMaterial() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "hooks/session-start.sh\n", stderr: ""),
+        ]
+
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: makeEntry())
+
+        #expect(result == .material(["hooks/session-start.sh"]))
+    }
+
+    @Test("Custom entry.ref propagates through fetch + diff against FETCH_HEAD")
+    func customRefPropagates() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "README.md\n", stderr: ""),
+        ]
+
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        _ = checker.classifyUpstreamChange(entry: makeEntry(ref: "v2.0"))
+
+        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "v2.0"])
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "HEAD", "FETCH_HEAD"])
+    }
+
+    @Test("Invalid entry.ref (argument injection) → .unknown(.fetchFailed); no git invocation")
+    func invalidRefRejected() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: makeEntry(ref: "-rf"))
+
+        #expect(result == .unknown(.fetchFailed))
+        #expect(mock.runCalls.isEmpty, "Refs starting with `-` must never reach git")
+    }
+
+    @Test("resolvedPath nil (containment escape) → .unknown(.missingClone)")
+    func missingCloneReturnsUnknown() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // localPath that escapes packsDirectory → PathContainment.safePath returns nil.
+        let entry = makeEntry(identifier: "pack-a", localPath: "../escape")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: entry)
+
+        #expect(result == .unknown(.missingClone))
+        #expect(mock.runCalls.isEmpty, "No git invocation when the clone path can't be resolved")
+    }
+
+    @Test("Clone directory absent on disk → .unknown(.missingClone), no git invoked")
+    func deletedCloneReturnsMissingClone() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Registry says the pack is at `~/.mcs/packs/pack-a/`, but the directory was deleted.
+        // `preparePackDir` is intentionally NOT called here.
+        let entry = makeEntry(identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: entry)
+
+        #expect(result == .unknown(.missingClone))
+        #expect(mock.runCalls.isEmpty, "No git invocation when the clone is missing on disk")
+    }
+
+    @Test("fetch fails → .unknown(.fetchFailed); diff is not called")
+    func fetchFailsNeverHide() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        mock.runResults = [
+            ShellResult(exitCode: 128, stdout: "", stderr: "fatal: unable to access"),
+        ]
+
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: makeEntry())
+
+        #expect(result == .unknown(.fetchFailed))
+        #expect(mock.runCalls.count == 1)
+    }
+
+    @Test("diff fails → .unknown(.diffFailed)")
+    func diffFailsNeverHide() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 128, stdout: "", stderr: "fatal: bad revision"),
+        ]
+
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        let result = checker.classifyUpstreamChange(entry: makeEntry())
+
+        #expect(result == .unknown(.diffFailed))
+    }
+
+    @Test("git commands pass GIT_TERMINAL_PROMPT=0 to avoid credential prompts")
+    func credentialSuppression() throws {
+        let tmpDir = try makeTmpDir(label: "classify")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let mock = MockShellRunner(environment: Environment(home: tmpDir))
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "README.md\n", stderr: ""),
+        ]
+
+        let checker = makeChecker(home: tmpDir, mock: mock)
+        _ = checker.classifyUpstreamChange(entry: makeEntry())
+
+        for call in mock.runCalls {
+            #expect(call.additionalEnvironment["GIT_TERMINAL_PROMPT"] == "0")
+        }
+    }
+}
+
+struct UpdateCheckerPackUpdatesTests {
+    private func writeRegistry(at env: Environment, entries: [PackRegistryFile.PackEntry]) throws {
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        var data = PackRegistryFile.RegistryData()
+        for entry in entries {
+            registry.register(entry, in: &data)
+        }
+        try registry.save(data)
+    }
+
+    @Test("Noise-only upstream commit → no PackUpdate, registry commitSHA advances")
+    func noiseSuppressedAndBaselineAdvances() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let env = Environment(home: tmpDir)
+        let entry = makeRegistryEntry(identifier: "pack-a", commitSHA: "old123")
+        try writeRegistry(at: env, entries: [entry])
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "new456\tHEAD\n", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "README.md\n", stderr: ""),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: [entry])
+
+        #expect(updates.isEmpty, "Noise-only upstream commit must not produce a notification")
+
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        let data = try registry.load()
+        #expect(registry.pack(identifier: "pack-a", in: data)?.commitSHA == "new456")
+    }
+
+    @Test("Material upstream commit → PackUpdate emitted, registry NOT advanced")
+    func materialEmitsUpdateAndPreservesBaseline() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let env = Environment(home: tmpDir)
+        let entry = makeRegistryEntry(identifier: "pack-a", commitSHA: "old123")
+        try writeRegistry(at: env, entries: [entry])
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "new456\tHEAD\n", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "hooks/session-start.sh\n", stderr: ""),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: [entry])
+
+        #expect(updates.count == 1)
+        #expect(updates.first?.identifier == "pack-a")
+        #expect(updates.first?.remoteSHA == "new456")
+
+        // Registry preserved at the old SHA — `mcs pack update` is responsible for advancing it.
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        let data = try registry.load()
+        #expect(registry.pack(identifier: "pack-a", in: data)?.commitSHA == "old123")
+    }
+
+    @Test("fetch failure during classification → never-hide (PackUpdate emitted)")
+    func fetchFailureSurfaces() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let env = Environment(home: tmpDir)
+        let entry = makeRegistryEntry(identifier: "pack-a", commitSHA: "old123")
+        try writeRegistry(at: env, entries: [entry])
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "new456\tHEAD\n", stderr: ""),
+            ShellResult(exitCode: 128, stdout: "", stderr: "fatal: unable to access"),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: [entry])
+
+        #expect(updates.count == 1, "fetch failure must never hide a real upstream change")
+    }
+
+    @Test("ls-remote SHA matches local → no classifier invocation, no update")
+    func noChangeSkipsClassifier() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let env = Environment(home: tmpDir)
+        let entry = makeRegistryEntry(identifier: "pack-a", commitSHA: "same789")
+        try writeRegistry(at: env, entries: [entry])
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "same789\tHEAD\n", stderr: ""),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: [entry])
+
+        #expect(updates.isEmpty)
+        #expect(mock.runCalls.count == 1)
+    }
+
+    @Test("Invalid registry ref → pack silently skipped (no ls-remote, no notification)")
+    func invalidRegistryRefSkipped() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let env = Environment(home: tmpDir)
+        // ref = "-rf" simulates registry corruption — would be argument injection if passed to git.
+        let entry = PackRegistryFile.PackEntry(
+            identifier: "pack-a",
+            displayName: "pack-a",
+            author: nil,
+            sourceURL: "https://example.com/pack-a.git",
+            ref: "-rf",
+            commitSHA: "old123",
+            localPath: "pack-a",
+            addedAt: "2026-01-01T00:00:00Z",
+            trustedScriptHashes: [:],
+            isLocal: nil
+        )
+        try writeRegistry(at: env, entries: [entry])
+
+        let mock = MockShellRunner(environment: env)
+        let updates = UpdateChecker(environment: env, shell: mock).checkPackUpdates(entries: [entry])
+
+        #expect(updates.isEmpty)
+        #expect(mock.runCalls.isEmpty, "Invalid ref must never invoke git, even ls-remote")
+    }
+
+    @Test("Local packs are filtered out before any git invocation")
+    func localPacksSkippedFromGitChecks() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "git-pack")
+
+        let env = Environment(home: tmpDir)
+        let gitEntry = makeRegistryEntry(identifier: "git-pack", commitSHA: "old999")
+        let localEntry = makeLocalRegistryEntry(identifier: "local-pack", localPath: "/tmp/local-pack")
+        try writeRegistry(at: env, entries: [gitEntry, localEntry])
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResultsByFirstArg = [
+            "ls-remote": ShellResult(exitCode: 0, stdout: "old999\tHEAD\n", stderr: ""),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: [gitEntry, localEntry])
+
+        #expect(updates.isEmpty)
+        // Exactly one ls-remote call (for the git pack) — the local pack is filtered out.
+        #expect(mock.runCalls.count == 1)
+        #expect(mock.runCalls[0].arguments == ["ls-remote", gitEntry.sourceURL, "HEAD"])
+    }
+
+    @Test("Multi-pack parallel run: each pack classified independently with the right SHA write")
+    func multiPackParallelClassification() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let identifiers = ["pack-a", "pack-b", "pack-c"]
+        for id in identifiers {
+            try preparePackDir(home: tmpDir, identifier: id)
+        }
+
+        let env = Environment(home: tmpDir)
+        let entries = identifiers.map { id in
+            makeRegistryEntry(identifier: id, commitSHA: "old-\(id)")
+        }
+        try writeRegistry(at: env, entries: entries)
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResultsByFirstArg = [
+            "ls-remote": ShellResult(exitCode: 0, stdout: "shared-new-sha\tHEAD\n", stderr: ""),
+            "fetch": ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            "diff": ShellResult(exitCode: 0, stdout: "README.md\n", stderr: ""),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: entries)
+
+        #expect(updates.isEmpty, "All three packs noise-only → no notifications")
+        #expect(mock.runCalls.count == 9, "3 packs × (ls-remote + fetch + diff)")
+
+        // Each pack's registry SHA was advanced independently in the post-loop write.
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        let data = try registry.load()
+        for id in identifiers {
+            #expect(registry.pack(identifier: id, in: data)?.commitSHA == "shared-new-sha")
+        }
+    }
+
+    @Test("Registry-write failure: suppression sticks for this run, baseline does not advance")
+    func registryWriteFailureContract() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        let mcsDir = tmpDir.appendingPathComponent(".mcs")
+        defer {
+            // Restore writability before cleanup — read-only parent prevents removal otherwise.
+            _ = try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: mcsDir.path
+            )
+            try? FileManager.default.removeItem(at: tmpDir)
+        }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let env = Environment(home: tmpDir)
+        let entry = makeRegistryEntry(identifier: "pack-a", commitSHA: "old123")
+        try writeRegistry(at: env, entries: [entry])
+
+        // Lock down the `.mcs/` directory so atomic write-and-rename can't create a temp file.
+        // File-level chmod 0444 is bypassed because `YAMLFile.save` writes-then-renames.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555], ofItemAtPath: mcsDir.path
+        )
+
+        let mock = MockShellRunner(environment: env)
+        mock.runResults = [
+            ShellResult(exitCode: 0, stdout: "new456\tHEAD\n", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "README.md\n", stderr: ""),
+        ]
+
+        let checker = UpdateChecker(environment: env, shell: mock)
+        let updates = checker.checkPackUpdates(entries: [entry])
+
+        // Suppression still happens this run — no notification is emitted.
+        #expect(updates.isEmpty, "Suppression is independent of the write outcome")
+
+        // But the registry SHA did NOT advance, so the next check will re-classify.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: mcsDir.path
+        )
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        let data = try registry.load()
+        #expect(registry.pack(identifier: "pack-a", in: data)?.commitSHA == "old123")
+    }
+
+    @Test("Cross-invocation persistence: advance from run 1 is honored in run 2")
+    func crossInvocationPersistence() throws {
+        let tmpDir = try makeTmpDir(label: "checkPackUpdates")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try preparePackDir(home: tmpDir, identifier: "pack-a")
+
+        let env = Environment(home: tmpDir)
+        let entry = makeRegistryEntry(identifier: "pack-a", commitSHA: "old123")
+        try writeRegistry(at: env, entries: [entry])
+
+        // Run 1: noise commit, suppress + advance to "new456".
+        let mock1 = MockShellRunner(environment: env)
+        mock1.runResults = [
+            ShellResult(exitCode: 0, stdout: "new456\tHEAD\n", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "README.md\n", stderr: ""),
+        ]
+        let updates1 = UpdateChecker(environment: env, shell: mock1)
+            .checkPackUpdates(entries: [entry])
+        #expect(updates1.isEmpty)
+
+        // Reload entry from registry to pick up the advanced SHA.
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        let advancedEntry = try #require(registry.pack(identifier: "pack-a", in: registry.load()))
+        #expect(advancedEntry.commitSHA == "new456")
+
+        // Run 2: ls-remote returns the same SHA — no upstream change relative to the advanced
+        // baseline → classifier is not invoked, no notification.
+        let mock2 = MockShellRunner(environment: env)
+        mock2.runResults = [
+            ShellResult(exitCode: 0, stdout: "new456\tHEAD\n", stderr: ""),
+        ]
+        let updates2 = UpdateChecker(environment: env, shell: mock2)
+            .checkPackUpdates(entries: [advancedEntry])
+
+        #expect(updates2.isEmpty)
+        #expect(mock2.runCalls.count == 1, "Only ls-remote — no fetch/diff after baseline caught up")
+    }
+}
+
 // MARK: - Parsing Tests
 
 struct UpdateCheckerParsingTests {
@@ -261,6 +822,24 @@ struct UpdateCheckerParsingTests {
         """
         let sha = UpdateChecker.parseRemoteSHA(from: output)
         #expect(sha == "abc123")
+    }
+
+    @Test("parseRemoteSHA prefers the peeled ^{} commit for annotated tags")
+    func parsePrefersPeeledTag() {
+        // Annotated tag: first line is the tag-object SHA, second is the peeled commit.
+        // The peeled commit is what `rev-parse HEAD` would resolve to after a checkout —
+        // writing the tag-object SHA into registry.yaml would desync the registry.
+        let output = """
+        tagobj11111111\trefs/tags/v1.0
+        commit22222222\trefs/tags/v1.0^{}
+        """
+        #expect(UpdateChecker.parseRemoteSHA(from: output) == "commit22222222")
+    }
+
+    @Test("parseRemoteSHA returns first SHA when no peeled line is present (lightweight tag / branch)")
+    func parseFirstSHAWhenNoPeeled() {
+        let output = "abc123def\trefs/heads/main"
+        #expect(UpdateChecker.parseRemoteSHA(from: output) == "abc123def")
     }
 
     @Test("parseLatestTag finds the highest CalVer tag")

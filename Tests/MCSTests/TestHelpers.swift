@@ -81,17 +81,28 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
 
     let environment: Environment
 
+    /// Mock is `@unchecked Sendable` and may be called concurrently from
+    /// `DispatchQueue.concurrentPerform`; the lock makes the queue and call arrays consistent.
+    private let lock = NSLock()
+
     var runCalls: [RunCall] = []
     var shellCalls: [ShellCall] = []
     var commandExistsCalls: [String] = []
 
-    /// Result returned from `run()` and `shell()`. Defaults to success.
+    /// Default result when neither queue below produces a value.
+    /// Dispatch precedence in `run()`: `runResultsByFirstArg[arguments.first]` →
+    /// `runResults.removeFirst()` → `result`.
     var result = ShellResult(exitCode: 0, stdout: "", stderr: "")
 
-    /// Sequential results for `run()`: pops first element when non-empty, falls back to `result`.
+    /// Positional queue for `run()`. Only safe for sequential call orders.
     var runResults: [ShellResult] = []
 
-    /// Sequential results for `shell()`: pops first element when non-empty, falls back to `result`.
+    /// Argument-keyed dispatch for `run()`, keyed on `arguments.first`. Use this for tests
+    /// where `concurrentPerform` interleaves calls — every matching call returns the same
+    /// canned response regardless of order.
+    var runResultsByFirstArg: [String: ShellResult] = [:]
+
+    /// Positional queue for `shell()`. Same precedence model as `runResults`.
     var shellResults: [ShellResult] = []
 
     /// Controls what `commandExists()` returns. Defaults to `true`.
@@ -102,6 +113,8 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
     }
 
     func commandExists(_ command: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         commandExistsCalls.append(command)
         return commandExistsResult
     }
@@ -114,6 +127,8 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
         additionalEnvironment: [String: String],
         interactive: Bool
     ) -> ShellResult {
+        lock.lock()
+        defer { lock.unlock() }
         runCalls.append(RunCall(
             executable: executable,
             arguments: arguments,
@@ -121,6 +136,9 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
             additionalEnvironment: additionalEnvironment,
             interactive: interactive
         ))
+        if let firstArg = arguments.first, let scripted = runResultsByFirstArg[firstArg] {
+            return scripted
+        }
         if !runResults.isEmpty {
             return runResults.removeFirst()
         }
@@ -134,6 +152,8 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
         additionalEnvironment: [String: String],
         interactive: Bool
     ) -> ShellResult {
+        lock.lock()
+        defer { lock.unlock() }
         shellCalls.append(ShellCall(
             command: command,
             workingDirectory: workingDirectory,
@@ -303,6 +323,15 @@ func makeLocalRegistryEntry(
         trustedScriptHashes: [:],
         isLocal: true
     )
+}
+
+/// Create the on-disk pack clone directory under `Environment(home:).packsDirectory` so
+/// `PackEntry.resolvedPath(packsDirectory:)` resolves and `PathContainment.safePath` allows
+/// it. The directory is empty — tests that mock the shell don't need a real git checkout,
+/// only a valid working directory to pass to git invocations.
+func preparePackDir(home: URL, identifier: String) throws {
+    let dir = Environment(home: home).packsDirectory.appendingPathComponent(identifier)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 }
 
 // MARK: - Temp Directory Helpers
