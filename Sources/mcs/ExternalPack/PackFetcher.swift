@@ -177,10 +177,10 @@ struct PackFetcher {
 // MARK: - Ref validation
 
 /// Predicate form of `PackFetcher.validateRef`. Returns `true` iff `ref` is safe to pass
-/// directly as a positional argument to git: not a `-` option, no `..` range, and limited
-/// to characters git accepts in branch/tag/commit names. Used by callers that want to
-/// silently skip invalid refs (e.g. `UpdateChecker`'s noise filter — registry corruption
-/// shouldn't surface as a git error).
+/// directly as a positional argument to git: not a `-` option, no `..` range, and matches
+/// a conservative subset of characters that git accepts (rejects e.g. `@`, which git allows
+/// outside `@{}`). Used by callers that want to silently skip invalid refs — registry
+/// corruption shouldn't surface as a git error.
 func isValidGitRef(_ ref: String) -> Bool {
     !ref.hasPrefix("-")
         && !ref.contains("..")

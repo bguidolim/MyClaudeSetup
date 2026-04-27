@@ -5,16 +5,17 @@ struct PackRegistryFile {
     let path: URL // ~/.mcs/registry.yaml
 
     struct PackEntry: Codable, Equatable {
-        let identifier: String
-        let displayName: String
-        let author: String?
-        let sourceURL: String // Git clone URL or original local path
-        let ref: String? // Git tag/branch/commit
-        let commitSHA: String // Exact commit (git) or "local" (local packs)
-        let localPath: String // Relative to ~/.mcs/packs/ (git) or absolute path (local)
-        let addedAt: String // ISO 8601 date
-        let trustedScriptHashes: [String: String] // relativePath -> SHA-256
-        let isLocal: Bool? // nil/false = git pack, true = local filesystem pack
+        // `var` only to enable copy-and-mutate via `withCommitSHA`; treat as immutable elsewhere.
+        var identifier: String
+        var displayName: String
+        var author: String?
+        var sourceURL: String // Git clone URL or original local path
+        var ref: String? // Git tag/branch/commit
+        var commitSHA: String // Exact commit (git) or "local" (local packs)
+        var localPath: String // Relative to ~/.mcs/packs/ (git) or absolute path (local)
+        var addedAt: String // ISO 8601 date
+        var trustedScriptHashes: [String: String] // relativePath -> SHA-256
+        var isLocal: Bool? // nil/false = git pack, true = local filesystem pack
 
         /// Whether this pack is a local filesystem pack (not cloned via git).
         var isLocalPack: Bool {
@@ -38,18 +39,9 @@ struct PackRegistryFile {
         /// the checkout" — used when a non-material upstream commit is recognized but
         /// not pulled.
         func withCommitSHA(_ sha: String) -> Self {
-            PackEntry(
-                identifier: identifier,
-                displayName: displayName,
-                author: author,
-                sourceURL: sourceURL,
-                ref: ref,
-                commitSHA: sha,
-                localPath: localPath,
-                addedAt: addedAt,
-                trustedScriptHashes: trustedScriptHashes,
-                isLocal: isLocal
-            )
+            var copy = self
+            copy.commitSHA = sha
+            return copy
         }
     }
 

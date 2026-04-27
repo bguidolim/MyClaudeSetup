@@ -307,6 +307,17 @@ struct UpdateCheckerClassifyDiffPathsTests {
         ])
         #expect(result == .suppressed)
     }
+
+    @Test("CRLF line endings: trailing `\\r` is stripped before deny-list match")
+    func crlfStrippedBeforeMatch() {
+        // git with `core.autocrlf=true` can emit `path\r\n`. After splitting on `\n`,
+        // each path keeps a trailing `\r`. Without `.whitespacesAndNewlines` trimming,
+        // `README.md\r` would miss the deny-list and surface as material.
+        let result = UpdateChecker.classifyDiffPaths([
+            "README.md\r", ".github/workflows/ci.yml\r",
+        ])
+        #expect(result == .suppressed)
+    }
 }
 
 struct UpdateCheckerOrchestratorTests {

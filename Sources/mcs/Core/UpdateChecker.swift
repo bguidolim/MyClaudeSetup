@@ -201,8 +201,11 @@ struct UpdateChecker {
     /// after a successful diff that found no changed paths, which is a "definitely no
     /// material change" signal — not an unknown one.
     static func classifyDiffPaths(_ paths: [String]) -> UpstreamChange {
+        // `.whitespacesAndNewlines` (not `.whitespaces`) so a trailing `\r` from CRLF
+        // output (git with `core.autocrlf=true`) gets stripped — otherwise `README.md\r`
+        // would miss the deny-list and surface as material.
         let cleaned = paths
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !cleaned.isEmpty else { return .suppressed }
 
@@ -310,8 +313,16 @@ struct UpdateChecker {
             let entry = gitEntries[index]
             // Refs are user-controllable via `mcs pack add --ref` and persisted in `registry.yaml`;
             // a corrupted ref starting with `-` would be interpreted as a git option (argument
-            // injection). Skip the pack silently — same behavior as ls-remote network failures.
-            if let ref = entry.ref, !isValidGitRef(ref) { return }
+            // injection). Skip the pack — registry corruption is permanent (unlike a transient
+            // ls-remote failure), so emit to MCS_DEBUG so the silent skip is at least visible
+            // during development. Production hooks stay quiet per the "non-intrusive" design.
+            if let ref = entry.ref, !isValidGitRef(ref) {
+                if Environment.isDebugMode {
+                    let message = "mcs: skipping update check for '\(entry.identifier)': invalid ref '\(ref)'\n"
+                    FileHandle.standardError.write(Data(message.utf8))
+                }
+                return
+            }
             let lsRemote = shell.run(
                 environment.gitPath,
                 arguments: ["ls-remote", entry.sourceURL, entry.ref ?? "HEAD"],
@@ -358,28 +369,33 @@ struct UpdateChecker {
     /// Apply collected SHA advances to `registry.yaml` in one load→mutate→save round-trip.
     /// Serializes the writes that were collected from the parallel `concurrentPerform` loop.
     ///
-    /// Failures are non-fatal: the registry stays at the old commit SHA, so the next check
-    /// re-runs the classifier on the same paths and either suppresses again (and re-attempts
-    /// the write) or surfaces the notification. We deliberately avoid `output.warn` here
-    /// because this runs inside the SessionStart hook path where the file-level "non-intrusive
-    /// checks" design goal precludes user-facing noise. To keep the failure mode visible during
-    /// development, we emit to stderr only when the `MCS_DEBUG` env var is set — production
-    /// runs stay silent.
+    /// Acquires `~/.mcs/lock` non-blocking before the load→mutate→save. `CheckUpdatesCommand`
+    /// runs as a SessionStart hook and is not itself a `LockedCommand`; without the lock, a
+    /// concurrent `mcs pack add/update` (which is locked) could read the registry between our
+    /// load and save and have its write clobbered. On lock contention we skip silently — the
+    /// next check re-classifies and retries.
+    ///
+    /// All other failures are non-fatal too: the registry stays at the old commit SHA, so the
+    /// next check re-runs the classifier and either suppresses again (re-attempting the write)
+    /// or surfaces the notification. We avoid `output.warn` here because this runs inside the
+    /// SessionStart hook path where the "non-intrusive checks" design goal precludes user-facing
+    /// noise; failures emit to stderr only when `MCS_DEBUG` is set.
     private func applyRegistryAdvances(_ advances: [(identifier: String, newSHA: String)]) {
-        let registry = PackRegistryFile(path: environment.packsRegistry)
         do {
-            var data = try registry.load()
-            for advance in advances {
-                guard let existing = registry.pack(identifier: advance.identifier, in: data) else { continue }
-                registry.register(existing.withCommitSHA(advance.newSHA), in: &data)
+            try withFileLock(at: environment.lockFile) {
+                let registry = PackRegistryFile(path: environment.packsRegistry)
+                var data = try registry.load()
+                for advance in advances {
+                    guard let existing = registry.pack(identifier: advance.identifier, in: data) else { continue }
+                    registry.register(existing.withCommitSHA(advance.newSHA), in: &data)
+                }
+                try registry.save(data)
             }
-            try registry.save(data)
         } catch {
             if Environment.isDebugMode {
                 let message = "mcs: registry advance write failed: \(error.localizedDescription)\n"
                 FileHandle.standardError.write(Data(message.utf8))
             }
-            // Registry write failure is non-fatal — next check will classify again.
         }
     }
 
