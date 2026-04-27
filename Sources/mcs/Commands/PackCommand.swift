@@ -625,8 +625,6 @@ struct UpdatePack: LockedCommand {
         let ctx = PackCommandContext()
         defer { MCSAnalytics.trackCommand(.packUpdate) }
 
-        ctx.output.warn("'mcs pack update' is deprecated. Use 'mcs update' to fetch and re-apply across all configured scopes in one step.")
-
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
             trustManager: PackTrustManager(output: ctx.output),

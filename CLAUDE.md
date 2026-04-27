@@ -24,7 +24,6 @@ mcs sync --global                # Sync global scope (MCP servers, brew, plugins
 mcs sync --lock                  # Checkout locked versions from mcs.lock.yaml
 mcs sync --update                # [DEPRECATED — use 'mcs update'] Fetch latest and force-write mcs.lock.yaml
 mcs update                       # Fetch latest pack versions and re-apply across every configured scope
-mcs update --pack ios            # Refresh specific packs only (repeatable)
 mcs update --global              # Refresh only the global scope
 mcs update --project             # Refresh only the current project's scope
 mcs update --all-projects        # Refresh global + every project tracked in ~/.mcs/projects.yaml (asks confirmation)
@@ -41,7 +40,7 @@ mcs pack add <url> --preview     # Preview pack contents without installing
 mcs pack remove <name>           # Remove an external tech pack
 mcs pack remove <name> --force   # Remove without confirmation
 mcs pack list                    # List registered external packs
-mcs pack update [name]           # [DEPRECATED — use 'mcs update'] Refresh pack registry only (no re-apply)
+mcs pack update [name]           # Refresh pack registry only (low-level fetch; use 'mcs update' for fetch + apply)
 mcs pack validate [source]       # Validate a tech pack (path, identifier, or current directory)
 mcs cleanup                      # Find and delete backup files
 mcs cleanup --force              # Delete backups without confirmation

@@ -1,12 +1,10 @@
 import ArgumentParser
 import Foundation
 
-/// Refresh configured packs across every scope they are installed in.
-///
-/// Fetches latest pack contents (with trust verification), then re-applies the
-/// existing configured set in both the global scope and the current project's scope.
-/// Does not add or remove packs — that stays the job of `mcs sync`. Lockfile writes
-/// are gated by `generate-lockfile`, unlike `mcs sync --update` which always writes.
+/// Refresh-only orchestration: fetch latest pack contents (with trust verification),
+/// then re-apply the existing configured set in both the global scope and the current
+/// project's scope. Does not add or remove packs (use `mcs sync`). Lockfile writes are
+/// gated by `generate-lockfile`, unlike `mcs sync --update` which force-writes.
 struct UpdateCommand: LockedCommand {
     static let configuration = CommandConfiguration(
         commandName: "update",
@@ -15,9 +13,6 @@ struct UpdateCommand: LockedCommand {
 
     @Argument(help: "Path to the project directory (defaults to current directory)")
     var path: String?
-
-    @Option(name: .long, help: "Pack identifier to update (repeatable). Defaults to all configured packs.")
-    var pack: [String] = []
 
     @Flag(name: .long, help: "Only refresh the global scope")
     var global: Bool = false
@@ -66,17 +61,12 @@ struct UpdateCommand: LockedCommand {
         let configuredAcrossScopes = runs.reduce(into: Set<String>()) {
             $0.formUnion($1.configuredPackIDs)
         }
-        let packsToUpdate = try resolveTargetPackIDs(
-            requestedPackIDs: pack,
-            configured: configuredAcrossScopes,
-            output: output
-        )
 
         let registryFile = PackRegistryFile(path: env.packsRegistry)
         let registryData = try registryFile.load()
 
         let (updatedRegistryData, anyUpdated, skippedPackIDs) = try runUpdatePhase(
-            packIDsToUpdate: packsToUpdate,
+            packIDsToUpdate: configuredAcrossScopes,
             registryFile: registryFile,
             registryData: registryData,
             env: env,
@@ -95,7 +85,6 @@ struct UpdateCommand: LockedCommand {
 
         try runReapplyPhase(
             runs: runs,
-            requestedPackIDs: Set(pack),
             skippedPackIDs: skippedPackIDs,
             registry: techPackRegistry,
             env: env,
@@ -112,9 +101,7 @@ struct UpdateCommand: LockedCommand {
 
     // MARK: - Helpers
 
-    /// Single scope flag enum keeps the validate + resolve paths in lockstep so
-    /// adding a new scope flag updates one site, not three.
-    private enum ScopeFlag: String, CaseIterable {
+    private enum ScopeFlag: String {
         case global = "--global"
         case project = "--project"
         case allProjects = "--all-projects"
@@ -155,8 +142,6 @@ struct UpdateCommand: LockedCommand {
         }
     }
 
-    /// Confirm before fanning out to every project. Skipped on `--dry-run` (read-only)
-    /// and in non-interactive runs (where there's no one to confirm).
     private func confirmFanOut(
         runs: [UpdateScopeResolver.ScopeRun],
         output: CLIOutput
@@ -204,27 +189,6 @@ struct UpdateCommand: LockedCommand {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         }
         return ProjectDetector.findProjectRoot(from: target)
-    }
-
-    private func resolveTargetPackIDs(
-        requestedPackIDs: [String],
-        configured: Set<String>,
-        output: CLIOutput
-    ) throws -> Set<String> {
-        guard !requestedPackIDs.isEmpty else { return configured }
-
-        let requested = Set(requestedPackIDs)
-        let unknown = requested.subtracting(configured)
-        for id in unknown.sorted() {
-            output.warn("Pack '\(id)' is not configured in any scope being updated — skipping.")
-        }
-
-        let intersection = requested.intersection(configured)
-        guard !intersection.isEmpty else {
-            output.error("No matching configured packs found.")
-            throw ExitCode.failure
-        }
-        return intersection
     }
 
     private func runUpdatePhase(
@@ -289,7 +253,6 @@ struct UpdateCommand: LockedCommand {
 
     private func runReapplyPhase(
         runs: [UpdateScopeResolver.ScopeRun],
-        requestedPackIDs: Set<String>,
         skippedPackIDs: Set<String>,
         registry: TechPackRegistry,
         env: Environment,
@@ -299,10 +262,7 @@ struct UpdateCommand: LockedCommand {
         for run in runs {
             output.header(run.label)
 
-            let scoped = requestedPackIDs.isEmpty
-                ? run.configuredPackIDs
-                : run.configuredPackIDs.intersection(requestedPackIDs)
-            let packIDs = scoped.subtracting(skippedPackIDs)
+            let packIDs = run.configuredPackIDs.subtracting(skippedPackIDs)
 
             var packs: [any TechPack] = []
             var unresolved: [String] = []

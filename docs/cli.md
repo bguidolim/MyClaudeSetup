@@ -36,7 +36,6 @@ Refresh already-configured packs across every scope they're installed in. Fetche
 
 ```bash
 mcs update                       # Refresh all configured packs in every scope (global + current project)
-mcs update --pack <name>         # Only refresh specific pack(s) (repeatable)
 mcs update --global              # Only refresh the global scope
 mcs update --project             # Only refresh the current project's scope
 mcs update --all-projects        # Refresh global + every project in the index (machine-wide)
@@ -46,11 +45,12 @@ mcs update --dry-run             # Preview without making changes
 | Flag | Description |
 |------|-------------|
 | `[path]` | Project directory (defaults to current directory) |
-| `--pack <name>` | Limit the update to specific pack(s). Repeatable. Must be a pack already configured in at least one scope. |
 | `--global` | Only refresh the global scope. Mutually exclusive with `--project` and `--all-projects`. |
 | `--project` | Only refresh the current project's scope. Mutually exclusive with `--global` and `--all-projects`. |
 | `--all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. Asks for confirmation in interactive mode and lists the affected projects first. Mutually exclusive with `--global` and `--project`. |
 | `--dry-run` | Preview changes without writing any files. |
+
+`mcs update` always refreshes the full configured set of every selected scope. To advance a single pack's registry pointer without applying anywhere, use [`mcs pack update <name>`](#mcs-pack-update-name).
 
 **About `--all-projects`:** this fans out machine-wide, running each pack's `configureProject` hook with the corresponding project as cwd. Uncommitted changes in those projects to managed files (settings, hooks, skills) may be overwritten. Always interactive-confirm in a terminal; pair with `--dry-run` first if unsure.
 
@@ -106,13 +106,13 @@ mcs pack list                    # List registered packs with status
 
 ### `mcs pack update [name]`
 
-> **Deprecated.** Use [`mcs update`](#mcs-update) instead — it fetches latest pack contents *and* re-applies them across every configured scope in one step. `mcs pack update` only refreshes the local pack checkout without applying the changes anywhere.
-
 ```bash
-mcs pack update [name]           # Update pack(s) to latest version (no re-apply)
+mcs pack update [name]           # Update pack(s) to latest version (registry only, no re-apply)
 ```
 
 Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically).
+
+This is a low-level fetch — useful for pack authors testing upstream changes without applying them, or in CI workflows that handle the apply step separately. For most users, [`mcs update`](#mcs-update) is the right command: it does the same fetch *and* re-applies across every configured scope.
 
 ### `mcs pack validate [source]`
 
