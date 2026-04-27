@@ -195,4 +195,42 @@ struct UpdateScopeResolverTests {
         let reloaded = try indexFile.load()
         #expect(reloaded.projects.isEmpty)
     }
+
+    @Test("Dry-run resolve does not rewrite the pruned index to disk")
+    func dryRunDoesNotPruneOnDisk() throws {
+        let home = try makeGlobalTmpDir(label: "update-resolver-stale-dry")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let stalePath = "/nonexistent/path/to/project"
+        var indexData = ProjectIndex.IndexData()
+        let indexFile = ProjectIndex(path: env.projectsIndexFile)
+        indexFile.upsert(projectPath: stalePath, packIDs: ["pack-x"], in: &indexData)
+        try indexFile.save(indexData)
+
+        let resolver = UpdateScopeResolver(environment: env, output: CLIOutput(colorsEnabled: false))
+        let runs = try resolver.resolve(filter: .all, projectRoot: nil, dryRun: true)
+        #expect(runs.isEmpty)
+
+        let reloaded = try indexFile.load()
+        #expect(reloaded.projects.count == 1)
+        #expect(reloaded.projects.first?.path == stalePath)
+    }
+
+    @Test("ProjectState is the source of truth — index entry is not required")
+    func stateOverridesMissingIndexEntry() throws {
+        let home = try makeGlobalTmpDir(label: "update-resolver-no-index")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        var globalState = try ProjectState(stateFile: env.globalStateFile)
+        globalState.recordPack("pack-a")
+        try globalState.save()
+
+        let resolver = UpdateScopeResolver(environment: env, output: CLIOutput(colorsEnabled: false))
+        let runs = try resolver.resolve(filter: .all, projectRoot: nil)
+        #expect(runs.count == 1)
+        #expect(runs[0].isGlobal)
+        #expect(runs[0].configuredPackIDs == ["pack-a"])
+    }
 }

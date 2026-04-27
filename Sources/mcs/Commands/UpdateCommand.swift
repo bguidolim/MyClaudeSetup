@@ -95,6 +95,7 @@ struct UpdateCommand: LockedCommand {
 
         try runReapplyPhase(
             runs: runs,
+            requestedPackIDs: Set(pack),
             skippedPackIDs: skippedPackIDs,
             registry: techPackRegistry,
             env: env,
@@ -288,6 +289,7 @@ struct UpdateCommand: LockedCommand {
 
     private func runReapplyPhase(
         runs: [UpdateScopeResolver.ScopeRun],
+        requestedPackIDs: Set<String>,
         skippedPackIDs: Set<String>,
         registry: TechPackRegistry,
         env: Environment,
@@ -297,8 +299,24 @@ struct UpdateCommand: LockedCommand {
         for run in runs {
             output.header(run.label)
 
-            let packIDs = run.configuredPackIDs.subtracting(skippedPackIDs)
-            let packs: [any TechPack] = packIDs.compactMap { registry.pack(for: $0) }
+            let scoped = requestedPackIDs.isEmpty
+                ? run.configuredPackIDs
+                : run.configuredPackIDs.intersection(requestedPackIDs)
+            let packIDs = scoped.subtracting(skippedPackIDs)
+
+            var packs: [any TechPack] = []
+            var unresolved: [String] = []
+            for packID in packIDs {
+                if let pack = registry.pack(for: packID) {
+                    packs.append(pack)
+                } else {
+                    unresolved.append(packID)
+                }
+            }
+
+            for packID in unresolved.sorted() {
+                output.warn("  \(packID): tracked in state but missing from pack registry — skipping. Run 'mcs pack add' to restore it.")
+            }
 
             guard !packs.isEmpty else {
                 output.info("No packs to refresh in this scope.")

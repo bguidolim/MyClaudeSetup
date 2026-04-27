@@ -2,9 +2,10 @@ import Foundation
 
 /// Resolves which scopes `mcs update` should refresh.
 ///
-/// Reads `~/.mcs/projects.yaml` and the per-scope state files to enumerate every
-/// place that has configured packs. Returns one entry per scope to refresh, with
-/// the strategy already constructed and the pack IDs ready to re-apply.
+/// `ProjectState` is the source of truth for whether a scope has configured packs.
+/// `~/.mcs/projects.yaml` is consulted only for project discovery (`.everywhere`)
+/// and for stale-entry pruning, since the index write in sync is best-effort and
+/// can lag behind state on a partial failure.
 struct UpdateScopeResolver {
     let environment: Environment
     let output: CLIOutput
@@ -42,8 +43,6 @@ struct UpdateScopeResolver {
 
         if filter != .projectOnly,
            let run = try buildRun(
-               indexEntryPath: ProjectIndex.globalSentinel,
-               in: indexData,
                strategy: GlobalSyncStrategy(environment: environment),
                label: "Global (\(environment.claudeDirectory.path))",
                isGlobal: true,
@@ -57,8 +56,6 @@ struct UpdateScopeResolver {
             for entry in indexData.projects {
                 guard let projectURL = entry.url?.standardizedFileURL else { continue }
                 if let run = try buildRun(
-                    indexEntryPath: entry.path,
-                    in: indexData,
                     strategy: ProjectSyncStrategy(projectPath: projectURL, environment: environment),
                     label: "Project: \(entry.path)",
                     isGlobal: false,
@@ -70,8 +67,6 @@ struct UpdateScopeResolver {
         case .all, .projectOnly:
             if let projectRoot,
                let run = try buildRun(
-                   indexEntryPath: projectRoot.standardizedFileURL.path,
-                   in: indexData,
                    strategy: ProjectSyncStrategy(projectPath: projectRoot, environment: environment),
                    label: "Project (\(projectRoot.lastPathComponent))",
                    isGlobal: false,
@@ -87,16 +82,11 @@ struct UpdateScopeResolver {
     }
 
     private func buildRun(
-        indexEntryPath: String,
-        in indexData: ProjectIndex.IndexData,
         strategy: any SyncStrategy,
         label: String,
         isGlobal: Bool,
         projectPath: URL?
     ) throws -> ScopeRun? {
-        let entry = indexData.projects.first { $0.path == indexEntryPath }
-        guard let entry, !entry.packs.isEmpty else { return nil }
-
         let state = try ProjectState(stateFile: strategy.scope.stateFile)
         let configured = state.configuredPacks
         guard !configured.isEmpty else { return nil }
