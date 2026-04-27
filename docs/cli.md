@@ -47,12 +47,12 @@ mcs update --dry-run             # Preview without making changes
 | `[path]` | Project directory (defaults to current directory) |
 | `--global` | Only refresh the global scope. Mutually exclusive with `--project` and `--all-projects`. |
 | `--project` | Only refresh the current project's scope. Mutually exclusive with `--global` and `--all-projects`. |
-| `--all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. Asks for confirmation in interactive mode and lists the affected projects first. Mutually exclusive with `--global` and `--project`. |
-| `--dry-run` | Preview changes without writing any files. |
+| `--all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. In a terminal, non-`--dry-run` runs list the affected projects and ask for confirmation first. Mutually exclusive with `--global` and `--project`. |
+| `--dry-run` | Preview changes without writing any files. When combined with `--all-projects`, the affected-projects listing and confirmation prompt are skipped (no side effects to confirm). |
 
 `mcs update` always refreshes the full configured set of every selected scope. To advance a single pack's registry pointer without applying anywhere, use [`mcs pack update <name>`](#mcs-pack-update-name).
 
-**About `--all-projects`:** this fans out machine-wide, running each pack's `configureProject` hook with the corresponding project as cwd. Uncommitted changes in those projects to managed files (settings, hooks, skills) may be overwritten. Always interactive-confirm in a terminal; pair with `--dry-run` first if unsure.
+**About `--all-projects`:** this fans out machine-wide, running each pack's `configureProject` hook with the corresponding project as cwd. Uncommitted changes in those projects to managed files (settings, hooks, skills) may be overwritten. In a terminal, non-`--dry-run` runs prompt for confirmation before proceeding; use `--dry-run` first if you want a no-write preview without that prompt.
 
 **Differences from `mcs sync`:**
 
