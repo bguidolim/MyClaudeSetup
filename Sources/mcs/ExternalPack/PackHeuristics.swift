@@ -25,10 +25,9 @@ enum PackHeuristics {
         findings += checkMCPDependencyGaps(components: components)
         findings += checkPythonModulePaths(components: components, packPath: packPath)
 
-        // Issue #338 Phase 3: when unreferenced-file warnings are present, point authors at
-        // the `ignore:` field so they can silence intentional non-material paths (docs/, examples/,
-        // assets) once and quiet both `mcs pack validate` and downstream update notifications.
-        if unreferenced.contains(where: { $0.severity == .warning && $0.message.contains("not referenced") }) {
+        // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
+        // (not for the IO-failure warnings that share the same severity).
+        if unreferenced.contains(where: { $0.severity == .warning && $0.message.contains(Self.unreferencedMarker) }) {
             findings.append(Finding(
                 severity: .warning,
                 message: "Add intentional non-material paths (docs/, examples/, assets) to the"
@@ -38,6 +37,10 @@ enum PackHeuristics {
 
         return findings
     }
+
+    /// Sentinel substring shared between the `unreferenced file` warning emitters and the hint
+    /// detector in `check(...)`. Keep the two emit sites and the detector aligned.
+    static let unreferencedMarker = "is not referenced"
 
     // MARK: - Individual Checks
 
@@ -187,7 +190,7 @@ enum PackHeuristics {
                 if isIgnoredByManifest(relativePath, manifest: manifest) { continue }
                 findings.append(Finding(
                     severity: .warning,
-                    message: "\(relativePath) is not referenced by any component or template"
+                    message: "\(relativePath) \(Self.unreferencedMarker) by any component or template"
                 ))
             }
         }
@@ -253,7 +256,7 @@ enum PackHeuristics {
             if !infrastructureFiles.contains(name), !referencedRootFiles.contains(name) {
                 findings.append(Finding(
                     severity: .warning,
-                    message: "\(name) is not referenced by any component"
+                    message: "\(name) \(Self.unreferencedMarker) by any component"
                 ))
             }
         }

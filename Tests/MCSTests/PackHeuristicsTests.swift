@@ -5,7 +5,8 @@ import Testing
 struct PackHeuristicsTests {
     private func minimalManifest(
         identifier: String = "test-pack",
-        components: [ExternalComponentDefinition]? = nil
+        components: [ExternalComponentDefinition]? = nil,
+        ignore: [String]? = nil
     ) -> ExternalPackManifest {
         ExternalPackManifest(
             schemaVersion: 1,
@@ -19,7 +20,7 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: ignore
         )
     }
 
@@ -812,7 +813,7 @@ struct PackHeuristicsTests {
         #expect(!PackHeuristics.isIgnoredByManifest("docs/guide.md", manifest: manifest))
     }
 
-    // MARK: - ignore: remediation hint (issue #338 Phase 3)
+    // MARK: - ignore: remediation hint
 
     @Test("Unreferenced files trigger the ignore: remediation hint")
     func unreferencedFilesEmitHint() throws {
@@ -870,13 +871,7 @@ struct PackHeuristicsTests {
             atomically: true, encoding: .utf8
         )
 
-        let manifest = ExternalPackManifest(
-            schemaVersion: 1,
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            description: "test",
-            author: nil,
-            minMCSVersion: nil,
+        let manifest = minimalManifest(
             components: [
                 ExternalComponentDefinition(
                     id: "test-pack.brew",
@@ -886,10 +881,6 @@ struct PackHeuristicsTests {
                     installAction: .brewInstall(package: "git")
                 ),
             ],
-            templates: nil,
-            prompts: nil,
-            configureProject: nil,
-            supplementaryDoctorChecks: nil,
             ignore: ["docs/"]
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
